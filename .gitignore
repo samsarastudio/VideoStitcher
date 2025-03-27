@@ -33,9 +33,12 @@ ENV/
 *.swo
 
 # Application specific
-uploads/
-outputs/
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
 *.mp4
+!wwe_video.mp4
 *.avi
 *.mov
 *.log

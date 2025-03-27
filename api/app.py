@@ -218,19 +218,18 @@ def get_jobs():
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():
     try:
-        if 'wwe_video' not in request.files or 'fan_video' not in request.files:
-            return jsonify({'success': False, 'message': 'Both WWE and fan videos are required'})
+        if 'fan_video' not in request.files:
+            return jsonify({'success': False, 'message': 'Fan video is required'})
 
-        wwe_video = request.files['wwe_video']
         fan_video = request.files['fan_video']
 
-        if wwe_video.filename == '' or fan_video.filename == '':
-            return jsonify({'success': False, 'message': 'No selected files'})
+        if fan_video.filename == '':
+            return jsonify({'success': False, 'message': 'No selected file'})
 
-        if not allowed_file(wwe_video.filename) or not allowed_file(fan_video.filename):
+        if not allowed_file(fan_video.filename):
             return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
 
-        if not check_file_size(wwe_video) or not check_file_size(fan_video):
+        if not check_file_size(fan_video):
             return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
 
         # Generate a unique job ID
@@ -240,12 +239,14 @@ def stitch_videos():
         job_dir = os.path.join(UPLOAD_FOLDER, job_id)
         os.makedirs(job_dir, exist_ok=True)
 
-        # Save uploaded files with original names
-        wwe_path = os.path.join(job_dir, secure_filename(wwe_video.filename))
+        # Save uploaded fan video with original name
         fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
-        
-        wwe_video.save(wwe_path)
         fan_video.save(fan_path)
+
+        # Use the main WWE video from the server
+        wwe_path = os.path.join(UPLOAD_FOLDER, 'wwe_video.mp4')
+        if not os.path.exists(wwe_path):
+            return jsonify({'success': False, 'message': 'Main WWE video not found on server'})
 
         # Add job to queue
         job_data = {
@@ -256,14 +257,13 @@ def stitch_videos():
             'stage': 'queued',
             'progress': 0,
             'created_at': datetime.now().isoformat(),
-            'original_wwe_filename': wwe_video.filename,
             'original_fan_filename': fan_video.filename
         }
         
         processing_jobs[job_id] = job_data
         return jsonify({
             'success': True,
-            'message': 'Videos uploaded successfully',
+            'message': 'Video uploaded successfully',
             'job_id': job_id
         })
 
@@ -449,33 +449,78 @@ def download_all_outputs():
         logging.error(f"Error in download_all_outputs: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
-@app.route('/api/download/<job_id>', methods=['GET'])
-def download_video(job_id):
+@app.route('/api/preview/<job_id>')
+def preview_video(job_id):
+    """Preview a video file"""
     try:
-        if job_id not in processing_jobs:
-            return jsonify({'success': False, 'message': 'Job not found'}), 404
+        job = processing_jobs.get(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'message': 'Job not found'
+            }), 404
 
-        job = processing_jobs[job_id]
         if job['status'] != 'completed':
-            return jsonify({'success': False, 'message': 'Video is not ready for download'}), 400
+            return jsonify({
+                'success': False,
+                'message': 'Video not ready for preview'
+            }), 400
 
-        output_filename = job.get('output_file')
-        if not output_filename:
-            return jsonify({'success': False, 'message': 'Output file not found'}), 404
+        output_path = job.get('output_path')
+        if not output_path or not os.path.exists(output_path):
+            return jsonify({
+                'success': False,
+                'message': 'Video file not found'
+            }), 404
 
-        file_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        if not os.path.exists(file_path):
-            return jsonify({'success': False, 'message': 'Output file does not exist'}), 404
-            
         return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=f"stitched_video_{job_id}.mp4"
+            output_path,
+            mimetype='video/mp4',
+            as_attachment=False
         )
-
     except Exception as e:
-        logging.error(f"Error in download_video: {str(e)}")
-        return jsonify({'success': False, 'message': str(e)}), 500
+        logging.error(f"Error previewing video: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error previewing video: {str(e)}'
+        }), 500
+
+@app.route('/api/download/<job_id>')
+def download_video(job_id):
+    """Download a processed video file"""
+    try:
+        job = processing_jobs.get(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'message': 'Job not found'
+            }), 404
+
+        if job['status'] != 'completed':
+            return jsonify({
+                'success': False,
+                'message': 'Video not ready for download'
+            }), 400
+
+        output_path = job.get('output_path')
+        if not output_path or not os.path.exists(output_path):
+            return jsonify({
+                'success': False,
+                'message': 'Video file not found'
+            }), 404
+
+        return send_file(
+            output_path,
+            mimetype='video/mp4',
+            as_attachment=True,
+            download_name=f'stitched_video_{job_id}.mp4'
+        )
+    except Exception as e:
+        logging.error(f"Error downloading video: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error downloading video: {str(e)}'
+        }), 500
 
 @app.route('/api/status', methods=['GET'])
 def get_status():

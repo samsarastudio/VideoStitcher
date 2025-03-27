@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Stitcher Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .status-card {
             transition: all 0.3s ease;
@@ -306,276 +307,318 @@
         .status-badge {
             font-size: 0.8rem;
         }
+        .file-preview {
+            max-width: 300px;
+            max-height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .preview-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+        }
+        .preview-content {
+            position: relative;
+            width: 90%;
+            max-width: 800px;
+            margin: 50px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .close-preview {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #333;
+        }
     </style>
 </head>
-<body>
-    <div class="container mt-4">
-        <h1 class="mb-4">Video Stitcher Dashboard</h1>
+<body class="bg-light">
+    <div class="container py-4">
+        <h1 class="text-center mb-4">Video Stitcher Dashboard</h1>
         
-        <!-- Control Panel -->
-        <div class="control-panel">
-            <h3>Process Controls</h3>
-            <div class="row">
-                <div class="col-md-6">
-                    <button class="btn btn-success me-2" onclick="startAllJobs()">Start All Jobs</button>
-                    <button class="btn btn-danger me-2" onclick="stopAllJobs()">Stop All Jobs</button>
-                </div>
-                <div class="col-md-6">
-                    <button class="btn btn-warning me-2" onclick="deleteAllOutputs()">Delete All Outputs</button>
-                    <button class="btn btn-primary" onclick="downloadAllOutputs()">Download All Outputs</button>
+        <!-- Upload Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Upload Videos</h5>
+            </div>
+            <div class="card-body">
+                <form id="uploadForm" class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">WWE Video</label>
+                        <input type="file" class="form-control" name="wwe_video" accept="video/*" required>
+                        <div class="form-text">Maximum file size: 100MB</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Fan Video</label>
+                        <input type="file" class="form-control" name="fan_video" accept="video/*" required>
+                        <div class="form-text">Maximum file size: 100MB</div>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-upload me-2"></i>Upload and Process
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Active Jobs Section -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Active Jobs</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshJobs()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="activeJobs" class="row">
+                    <!-- Active jobs will be inserted here -->
                 </div>
             </div>
         </div>
 
-        <!-- Server Status -->
-        <div class="alert alert-info" id="serverStatus">
-            Server Status: Checking...
-        </div>
-
-        <!-- Active Jobs -->
-        <h2 class="mt-4">Active Jobs</h2>
-        <div id="activeJobs" class="row">
-            <!-- Jobs will be inserted here -->
-        </div>
-
-        <!-- Recent Jobs -->
-        <h2 class="mt-4">Recent Jobs</h2>
-        <div id="recentJobs" class="row">
-            <!-- Jobs will be inserted here -->
+        <!-- Recent Jobs Section -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Recent Jobs</h5>
+            </div>
+            <div class="card-body">
+                <div id="recentJobs" class="row">
+                    <!-- Recent jobs will be inserted here -->
+                </div>
+            </div>
         </div>
     </div>
 
-    <script>
-        // Job status polling interval (in milliseconds)
-        const POLL_INTERVAL = 2000;
-        let pollTimer = null;
+    <!-- Preview Modal -->
+    <div id="previewModal" class="preview-modal">
+        <div class="preview-content">
+            <span class="close-preview" onclick="closePreview()">&times;</span>
+            <h4 class="mb-3">Video Preview</h4>
+            <video id="previewVideo" controls class="w-100">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
 
-        // Format date
-        function formatDate(dateString) {
-            return new Date(dateString).toLocaleString();
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentJobs = new Set();
+        let refreshInterval;
+
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshJobs();
+            refreshInterval = setInterval(refreshJobs, 5000);
+        });
+
+        // Handle file upload
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            try {
+                const response = await fetch('/api/stitch', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showAlert('success', 'Videos uploaded successfully! Processing started.');
+                    this.reset();
+                    refreshJobs();
+                } else {
+                    showAlert('danger', data.message || 'Upload failed');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error uploading videos');
+                console.error('Upload error:', error);
+            }
+        });
+
+        // Refresh jobs list
+        async function refreshJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateActiveJobs(data.active_jobs);
+                    updateRecentJobs(data.recent_jobs);
+                }
+            } catch (error) {
+                console.error('Error refreshing jobs:', error);
+            }
         }
 
-        // Create job card HTML
-        function createJobCard(job) {
-            const statusClass = {
-                'queued': 'bg-secondary',
-                'processing': 'bg-primary',
-                'completed': 'bg-success',
-                'failed': 'bg-danger',
-                'stopped': 'bg-warning',
-                'paused': 'bg-info'
-            }[job.status] || 'bg-secondary';
+        // Update active jobs display
+        function updateActiveJobs(jobs) {
+            const container = document.getElementById('activeJobs');
+            container.innerHTML = '';
+            
+            jobs.forEach(job => {
+                if (!currentJobs.has(job.id)) {
+                    currentJobs.add(job.id);
+                    container.appendChild(createJobCard(job, true));
+                }
+            });
+        }
 
-            return `
-                <div class="col-md-6">
-                    <div class="card job-card">
-                        <div class="card-body">
-                            <h5 class="card-title">Job ${job.id.slice(0, 8)}</h5>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="badge ${statusClass} status-badge">${job.status}</span>
-                                <small class="text-muted">Created: ${formatDate(job.created_at)}</small>
-                            </div>
-                            <div class="progress mb-2">
-                                <div class="progress-bar ${statusClass}" role="progressbar" 
+        // Update recent jobs display
+        function updateRecentJobs(jobs) {
+            const container = document.getElementById('recentJobs');
+            container.innerHTML = '';
+            
+            jobs.forEach(job => {
+                container.appendChild(createJobCard(job, false));
+            });
+        }
+
+        // Create job card
+        function createJobCard(job, isActive) {
+            const card = document.createElement('div');
+            card.className = 'col-md-6 job-card';
+            card.innerHTML = `
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <h6 class="card-title">Job ID: ${job.id}</h6>
+                            <span class="badge ${getStatusBadgeClass(job.status)} status-badge">
+                                ${job.status}
+                            </span>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <small class="text-muted">Created: ${formatDate(job.created_at)}</small>
+                        </div>
+
+                        ${isActive ? `
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" 
                                      style="width: ${job.progress * 100}%">
                                     ${Math.round(job.progress * 100)}%
                                 </div>
                             </div>
-                            <p class="card-text">Stage: ${job.stage}</p>
-                            ${job.error ? `<p class="text-danger">Error: ${job.error}</p>` : ''}
-                            <div class="btn-group">
-                                ${job.status === 'queued' || job.status === 'paused' || job.status === 'stopped' 
-                                    ? `<button class="btn btn-sm btn-success" onclick="startJob('${job.id}')">Start</button>` 
-                                    : ''}
-                                ${job.status === 'processing' || job.status === 'queued'
-                                    ? `<button class="btn btn-sm btn-danger" onclick="stopJob('${job.id}')">Stop</button>` 
-                                    : ''}
-                                ${job.status === 'processing'
-                                    ? `<button class="btn btn-sm btn-warning" onclick="pauseJob('${job.id}')">Pause</button>` 
-                                    : ''}
-                                ${job.status === 'paused'
-                                    ? `<button class="btn btn-sm btn-info" onclick="resumeJob('${job.id}')">Resume</button>` 
-                                    : ''}
-                                ${job.status === 'completed'
-                                    ? `<button class="btn btn-sm btn-primary" onclick="downloadVideo('${job.id}')">Download</button>` 
-                                    : ''}
+                            <div class="mb-3">
+                                <small class="text-muted">Stage: ${job.stage}</small>
                             </div>
+                        ` : ''}
+
+                        ${job.message ? `
+                            <div class="alert alert-info mb-3">
+                                ${job.message}
+                            </div>
+                        ` : ''}
+
+                        ${job.error ? `
+                            <div class="alert alert-danger mb-3">
+                                ${job.error}
+                            </div>
+                        ` : ''}
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            ${isActive ? `
+                                <button class="btn btn-sm btn-danger" onclick="stopJob('${job.id}')">
+                                    <i class="fas fa-stop"></i> Stop
+                                </button>
+                            ` : ''}
+                            
+                            ${job.status === 'completed' ? `
+                                <a href="/api/download/${job.id}" class="btn btn-sm btn-success">
+                                    <i class="fas fa-download"></i> Download
+                                </a>
+                            ` : ''}
                         </div>
                     </div>
                 </div>
             `;
+            return card;
         }
 
-        // Update server status
-        async function updateServerStatus() {
-            try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('serverStatus').innerHTML = `
-                        Server Status: ${data.server_status}<br>
-                        Active Processes: ${data.active_processes}/${data.max_concurrent_processes}<br>
-                        Queue Size: ${data.queue_size}/${data.max_queue_size}
-                    `;
-                }
-            } catch (error) {
-                console.error('Error updating server status:', error);
-            }
+        // Helper functions
+        function getStatusBadgeClass(status) {
+            const classes = {
+                'queued': 'bg-secondary',
+                'processing': 'bg-primary',
+                'completed': 'bg-success',
+                'failed': 'bg-danger',
+                'paused': 'bg-warning'
+            };
+            return classes[status] || 'bg-secondary';
         }
 
-        // Update jobs display
-        async function updateJobs() {
-            try {
-                const response = await fetch('/api/jobs');
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('activeJobs').innerHTML = data.active_jobs.map(createJobCard).join('');
-                    document.getElementById('recentJobs').innerHTML = data.recent_jobs.map(createJobCard).join('');
-                }
-            } catch (error) {
-                console.error('Error updating jobs:', error);
-            }
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        }
+
+        function showAlert(type, message) {
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type} alert-dismissible fade show`;
+            alert.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.querySelector('.container').insertBefore(alert, document.querySelector('.card'));
+            setTimeout(() => alert.remove(), 5000);
         }
 
         // Job control functions
-        async function startJob(jobId) {
-            try {
-                const response = await fetch(`/api/job/${jobId}/start`, { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error starting job:', error);
-                alert('Error starting job');
-            }
-        }
-
         async function stopJob(jobId) {
             try {
-                const response = await fetch(`/api/job/${jobId}/stop`, { method: 'POST' });
+                const response = await fetch(`/api/job/${jobId}/stop`, {
+                    method: 'POST'
+                });
                 const data = await response.json();
+                
                 if (data.success) {
-                    updateJobs();
+                    showAlert('success', 'Job stopped successfully');
+                    refreshJobs();
                 } else {
-                    alert(data.message);
+                    showAlert('danger', data.message || 'Failed to stop job');
                 }
             } catch (error) {
-                console.error('Error stopping job:', error);
-                alert('Error stopping job');
+                showAlert('danger', 'Error stopping job');
+                console.error('Stop job error:', error);
             }
         }
 
-        async function pauseJob(jobId) {
-            try {
-                const response = await fetch(`/api/job/${jobId}/pause`, { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error pausing job:', error);
-                alert('Error pausing job');
+        // Preview functions
+        function showPreview(videoUrl) {
+            const modal = document.getElementById('previewModal');
+            const video = document.getElementById('previewVideo');
+            video.src = videoUrl;
+            modal.style.display = 'block';
+        }
+
+        function closePreview() {
+            const modal = document.getElementById('previewModal');
+            const video = document.getElementById('previewVideo');
+            video.pause();
+            video.src = '';
+            modal.style.display = 'none';
+        }
+
+        // Close preview when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('previewModal');
+            if (event.target === modal) {
+                closePreview();
             }
         }
-
-        async function resumeJob(jobId) {
-            try {
-                const response = await fetch(`/api/job/${jobId}/resume`, { method: 'POST' });
-                const data = await response.json();
-                    if (data.success) {
-                    updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error resuming job:', error);
-                alert('Error resuming job');
-            }
-        }
-
-        async function downloadVideo(jobId) {
-            window.location.href = `/api/download/${jobId}`;
-        }
-
-        // Global control functions
-        async function startAllJobs() {
-            try {
-                const response = await fetch('/api/jobs/start_all', { method: 'POST' });
-                const data = await response.json();
-                    if (data.success) {
-                        updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error starting all jobs:', error);
-                alert('Error starting all jobs');
-            }
-        }
-
-        async function stopAllJobs() {
-            try {
-                const response = await fetch('/api/jobs/stop_all', { method: 'POST' });
-                const data = await response.json();
-                    if (data.success) {
-                        updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error stopping all jobs:', error);
-                alert('Error stopping all jobs');
-            }
-        }
-
-        async function deleteAllOutputs() {
-            if (!confirm('Are you sure you want to delete all output files?')) {
-                return;
-            }
-            try {
-                const response = await fetch('/api/jobs/delete_all', { method: 'POST' });
-                const data = await response.json();
-                if (data.success) {
-                    updateJobs();
-                } else {
-                    alert(data.message);
-                }
-            } catch (error) {
-                console.error('Error deleting all outputs:', error);
-                alert('Error deleting all outputs');
-            }
-        }
-
-        function downloadAllOutputs() {
-            window.location.href = '/api/jobs/download_all';
-        }
-
-        // Start polling
-        function startPolling() {
-            updateServerStatus();
-            updateJobs();
-            pollTimer = setInterval(() => {
-                updateServerStatus();
-                updateJobs();
-            }, POLL_INTERVAL);
-        }
-
-        // Stop polling when page is hidden
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                clearInterval(pollTimer);
-            } else {
-                startPolling();
-            }
-        });
-
-        // Start initial polling
-        startPolling();
     </script>
 </body>
 </html> 
