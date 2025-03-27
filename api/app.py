@@ -36,10 +36,10 @@ ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov'}
 
 # File management settings
 MAX_FILE_AGE_HOURS = 24  # Files older than this will be deleted
-MAX_CONCURRENT_PROCESSES = 3  # Maximum number of concurrent video processing tasks
-MAX_FILE_SIZE_MB = 500  # Maximum file size in MB
-MAX_QUEUE_SIZE = 10  # Maximum number of jobs in queue
-MAX_RECENT_JOBS = 10  # Maximum number of recent jobs to show
+MAX_CONCURRENT_PROCESSES = 1  # Reduced for free tier
+MAX_FILE_SIZE_MB = 100  # Reduced for free tier
+MAX_QUEUE_SIZE = 3  # Reduced for free tier
+MAX_RECENT_JOBS = 5  # Reduced for free tier
 
 # Global processing lock and queue
 processing_lock = threading.Lock()
