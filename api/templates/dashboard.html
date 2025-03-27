@@ -575,10 +575,7 @@
             container.innerHTML = '';
             
             jobs.forEach(job => {
-                if (!currentJobs.has(job.id)) {
-                    currentJobs.add(job.id);
-                    container.appendChild(createJobCard(job, true));
-                }
+                container.appendChild(createJobCard(job, true));
             });
         }
 
@@ -596,32 +593,62 @@
         function createJobCard(job, isActive) {
             const card = document.createElement('div');
             card.className = 'col-md-6 job-card';
+            
+            let statusBadge = `<span class="badge ${getStatusBadgeClass(job.status)} status-badge">${job.status}</span>`;
+            let progressBar = '';
+            let actionButtons = '';
+            
+            if (isActive) {
+                progressBar = `
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: ${job.progress * 100}%">
+                            ${Math.round(job.progress * 100)}%
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">Stage: ${job.stage}</small>
+                    </div>
+                `;
+                actionButtons = `
+                    <button class="btn btn-sm btn-danger" onclick="stopJob('${job.id}')">
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                `;
+            } else if (job.status === 'completed') {
+                actionButtons = `
+                    <div class="d-flex gap-2">
+                        <a href="/api/download/${job.id}" class="btn btn-sm btn-success">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                        <button class="btn btn-sm btn-info" onclick="showPreview('/api/preview/${job.id}')">
+                            <i class="fas fa-play"></i> Preview
+                        </button>
+                    </div>
+                `;
+            }
+            
+            let sizeInfo = '';
+            if (job.output_size) {
+                sizeInfo = `<div class="text-muted small">Output size: ${job.output_size.toFixed(1)} MB</div>`;
+            }
+            
             card.innerHTML = `
                 <div class="card h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-3">
                             <h6 class="card-title">Job ID: ${job.id}</h6>
-                            <span class="badge ${getStatusBadgeClass(job.status)} status-badge">
-                                ${job.status}
-                            </span>
+                            ${statusBadge}
                         </div>
                         
                         <div class="mb-3">
                             <small class="text-muted">Created: ${formatDate(job.created_at)}</small>
+                            ${job.start_time ? `<br><small class="text-muted">Started: ${formatDate(job.start_time)}</small>` : ''}
+                            ${job.end_time ? `<br><small class="text-muted">Completed: ${formatDate(job.end_time)}</small>` : ''}
                         </div>
 
-                        ${isActive ? `
-                            <div class="progress mb-3">
-                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                     role="progressbar" 
-                                     style="width: ${job.progress * 100}%">
-                                    ${Math.round(job.progress * 100)}%
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <small class="text-muted">Stage: ${job.stage}</small>
-                            </div>
-                        ` : ''}
+                        ${progressBar}
 
                         ${job.message ? `
                             <div class="alert alert-info mb-3">
@@ -635,18 +662,10 @@
                             </div>
                         ` : ''}
 
+                        ${sizeInfo}
+
                         <div class="d-flex justify-content-between align-items-center">
-                            ${isActive ? `
-                                <button class="btn btn-sm btn-danger" onclick="stopJob('${job.id}')">
-                                    <i class="fas fa-stop"></i> Stop
-                                </button>
-                            ` : ''}
-                            
-                            ${job.status === 'completed' ? `
-                                <a href="/api/download/${job.id}" class="btn btn-sm btn-success">
-                                    <i class="fas fa-download"></i> Download
-                                </a>
-                            ` : ''}
+                            ${actionButtons}
                         </div>
                     </div>
                 </div>

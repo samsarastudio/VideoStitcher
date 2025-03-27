@@ -121,28 +121,51 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             'message': 'Starting video processing...'
         })
         
+        # Validate input videos
+        for video_path in [wwe_path, fan_path]:
+            if not os.path.exists(video_path):
+                raise Exception(f"Video file not found: {video_path}")
+            
+            size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            if size_mb < 0.01:  # Less than 10KB
+                raise Exception(f"Video file too small: {video_path} ({size_mb:.2f} MB)")
+        
         # Process videos
         stitcher = VideoStitcher(wwe_path, fan_path)
         update_job_progress(job_id, 0.1, 'loading_videos')
         success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
         
         if success:
+            # Validate output video
+            if not os.path.exists(output_path):
+                raise Exception("Output video not created")
+            
+            output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+            if output_size_mb < 10:  # Less than 10MB
+                raise Exception(f"Output video too small: {output_size_mb:.2f} MB")
+            
             processing_jobs[job_id].update({
                 'status': 'completed',
                 'end_time': datetime.now().isoformat(),
                 'message': message,
                 'progress': 1.0,
-                'stage': 'completed'
+                'stage': 'completed',
+                'output_path': output_path,
+                'output_size': output_size_mb
             })
-            # Clean up uploaded files
-            os.remove(wwe_path)
-            os.remove(fan_path)
             
             # Add to recent jobs
             with processing_lock:
                 recent_jobs.insert(0, processing_jobs[job_id].copy())
                 if len(recent_jobs) > MAX_RECENT_JOBS:
                     recent_jobs.pop()
+            
+            # Clean up uploaded files
+            try:
+                os.remove(wwe_path)
+                os.remove(fan_path)
+            except Exception as e:
+                logging.warning(f"Error cleaning up files: {str(e)}")
         else:
             raise Exception(message)
             
@@ -205,14 +228,15 @@ def get_jobs():
             for job in recent_jobs:
                 job_info = {
                     'id': job.get('id'),
-                    'status': job['status'],
-                    'created_at': job['created_at'],
+                    'status': job.get('status'),
+                    'created_at': job.get('created_at'),
                     'start_time': job.get('start_time'),
                     'end_time': job.get('end_time'),
                     'progress': job.get('progress', 0),
                     'stage': job.get('stage', 'completed'),
                     'message': job.get('message', ''),
-                    'error': job.get('error', '')
+                    'error': job.get('error', ''),
+                    'output_size': job.get('output_size', 0)
                 }
                 recent_job_details.append(job_info)
             
