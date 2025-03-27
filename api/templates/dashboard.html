@@ -422,6 +422,26 @@
             </div>
         </div>
 
+        <!-- Output Files Section -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Output Files</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-primary me-2" onclick="refreshOutputFiles()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteAllOutputs()">
+                        <i class="fas fa-trash"></i> Delete All
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="outputFiles" class="row">
+                    <!-- Output files will be inserted here -->
+                </div>
+            </div>
+        </div>
+
         <!-- Recent Jobs Section -->
         <div class="card">
             <div class="card-header">
@@ -526,6 +546,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             checkWweVideo();
             refreshJobs();
+            refreshOutputFiles();
             refreshInterval = setInterval(refreshJobs, 5000);
         });
 
@@ -742,6 +763,114 @@
             const modal = document.getElementById('previewModal');
             if (event.target === modal) {
                 closePreview();
+            }
+        }
+
+        // Output files functions
+        async function refreshOutputFiles() {
+            try {
+                const response = await fetch('/api/outputs');
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateOutputFiles(data.files);
+                }
+            } catch (error) {
+                console.error('Error refreshing output files:', error);
+                showAlert('danger', 'Error loading output files');
+            }
+        }
+
+        function updateOutputFiles(files) {
+            const container = document.getElementById('outputFiles');
+            container.innerHTML = '';
+            
+            if (files.length === 0) {
+                container.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            No output files available
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            files.forEach(file => {
+                const fileSize = (file.size / (1024 * 1024)).toFixed(1);
+                const card = document.createElement('div');
+                card.className = 'col-md-4 mb-3';
+                card.innerHTML = `
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <h6 class="card-title">${file.name}</h6>
+                                <span class="badge bg-info">${fileSize} MB</span>
+                            </div>
+                            <div class="mb-3">
+                                <small class="text-muted">Created: ${formatDate(file.created_at)}</small>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <a href="/api/download/${file.job_id}" class="btn btn-sm btn-success">
+                                    <i class="fas fa-download"></i> Download
+                                </a>
+                                <button class="btn btn-sm btn-info" onclick="showPreview('/api/preview/${file.job_id}')">
+                                    <i class="fas fa-play"></i> Preview
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteOutput('${file.job_id}')">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function deleteOutput(jobId) {
+            if (!confirm('Are you sure you want to delete this output file?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/output/${jobId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', 'Output file deleted successfully');
+                    refreshOutputFiles();
+                } else {
+                    showAlert('danger', data.message || 'Failed to delete file');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error deleting file');
+                console.error('Delete file error:', error);
+            }
+        }
+
+        async function deleteAllOutputs() {
+            if (!confirm('Are you sure you want to delete all output files?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/outputs/delete_all', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', 'All output files deleted successfully');
+                    refreshOutputFiles();
+                } else {
+                    showAlert('danger', data.message || 'Failed to delete files');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error deleting files');
+                console.error('Delete all files error:', error);
             }
         }
     </script>

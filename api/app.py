@@ -683,6 +683,91 @@ def stitch_single_video():
         logging.error(f"Error in stitch_single_video: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
+@app.route('/api/outputs', methods=['GET'])
+def get_output_files():
+    """Get list of all output files"""
+    try:
+        files = []
+        for filename in os.listdir(OUTPUT_FOLDER):
+            if filename.endswith('.mp4'):
+                file_path = os.path.join(OUTPUT_FOLDER, filename)
+                file_stat = os.stat(file_path)
+                job_id = filename.rsplit('.', 1)[0]  # Remove .mp4 extension
+                
+                files.append({
+                    'name': filename,
+                    'job_id': job_id,
+                    'size': file_stat.st_size,
+                    'created_at': datetime.fromtimestamp(file_stat.st_ctime).isoformat(),
+                    'modified_at': datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+                })
+        
+        # Sort by creation date, newest first
+        files.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'files': files
+        })
+    except Exception as e:
+        logging.error(f"Error getting output files: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error getting output files: {str(e)}'
+        }), 500
+
+@app.route('/api/output/<job_id>', methods=['DELETE'])
+def delete_output_file(job_id):
+    """Delete a specific output file"""
+    try:
+        file_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
+        
+        if not os.path.exists(file_path):
+            return jsonify({
+                'success': False,
+                'message': 'File not found'
+            }), 404
+        
+        os.remove(file_path)
+        logging.info(f"Deleted output file: {file_path}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'File deleted successfully'
+        })
+    except Exception as e:
+        logging.error(f"Error deleting output file: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error deleting file: {str(e)}'
+        }), 500
+
+@app.route('/api/outputs/delete_all', methods=['POST'])
+def delete_all_output_files():
+    """Delete all output files"""
+    try:
+        deleted_count = 0
+        for filename in os.listdir(OUTPUT_FOLDER):
+            if filename.endswith('.mp4'):
+                file_path = os.path.join(OUTPUT_FOLDER, filename)
+                try:
+                    os.remove(file_path)
+                    deleted_count += 1
+                    logging.info(f"Deleted output file: {file_path}")
+                except Exception as e:
+                    logging.error(f"Error deleting file {filename}: {str(e)}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {deleted_count} output files'
+        })
+    except Exception as e:
+        logging.error(f"Error deleting all output files: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error deleting files: {str(e)}'
+        }), 500
+
 # Schedule cleanup task
 def schedule_cleanup():
     while True:
