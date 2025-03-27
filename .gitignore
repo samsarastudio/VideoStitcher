@@ -25,16 +25,12 @@ venv/
 env/
 ENV/
 .env
-.venv
-env.bak/
-venv.bak/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
 
 # Application specific
 uploads/
@@ -43,8 +39,10 @@ outputs/
 *.avi
 *.mov
 *.log
-video_stitcher.log
-setup.log
+
+# OS specific
+.DS_Store
+Thumbs.db
 
 # Temporary files
 *.tmp

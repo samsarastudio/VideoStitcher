@@ -23,7 +23,10 @@ logging.basicConfig(
     ]
 )
 
-app = Flask(__name__)
+app = Flask(__name__, 
+    template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
+    static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-here')  # Required for session
 
 # Configuration
@@ -158,6 +161,59 @@ def process_queue():
         except Exception as e:
             logging.error(f"Error in queue processor: {str(e)}")
             time.sleep(1)  # Prevent tight loop on errors
+
+@app.route('/')
+def dashboard():
+    """Render the dashboard page"""
+    return render_template('dashboard.html')
+
+@app.route('/api/jobs', methods=['GET'])
+def get_jobs():
+    """Get active and recent jobs"""
+    try:
+        with processing_lock:
+            active_jobs = []
+            for job_id, job in processing_jobs.items():
+                if job['status'] in ['queued', 'processing', 'paused']:
+                    job_info = {
+                        'id': job_id,
+                        'status': job['status'],
+                        'created_at': job['created_at'],
+                        'start_time': job.get('start_time'),
+                        'progress': job.get('progress', 0),
+                        'stage': job.get('stage', 'queued'),
+                        'message': job.get('message', ''),
+                        'error': job.get('error', '')
+                    }
+                    active_jobs.append(job_info)
+            
+            recent_job_details = []
+            for job in recent_jobs:
+                job_info = {
+                    'id': job.get('id'),
+                    'status': job['status'],
+                    'created_at': job['created_at'],
+                    'start_time': job.get('start_time'),
+                    'end_time': job.get('end_time'),
+                    'progress': job.get('progress', 0),
+                    'stage': job.get('stage', 'completed'),
+                    'message': job.get('message', ''),
+                    'error': job.get('error', '')
+                }
+                recent_job_details.append(job_info)
+            
+            return jsonify({
+                'success': True,
+                'active_jobs': active_jobs,
+                'recent_jobs': recent_job_details,
+                'server_time': datetime.now().isoformat()
+            })
+    except Exception as e:
+        logging.error(f"Error getting jobs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error getting jobs: {str(e)}'
+        }), 500
 
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():

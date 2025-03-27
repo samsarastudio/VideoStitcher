@@ -2,19 +2,16 @@ services:
   - type: web
     name: video-stitcher
     env: python
-    buildCommand: |
-      apt-get update && apt-get install -y build-essential python3-dev
-      pip install --upgrade pip
-      pip install wheel setuptools
-      pip install numpy==1.21.6 --only-binary :all:
-      pip install -r requirements.txt
-    startCommand: gunicorn api.app:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.18
-      - key: PYTHONPATH
-        value: /opt/render/project/src/video_stitcher_app
-    healthCheckPath: /api/status
+        value: 3.11.0
+      - key: FLASK_ENV
+        value: production
+      - key: RENDER_TEMP_DIR
+        value: /tmp
+    healthCheckPath: /
     autoDeploy: true
     disk:
       name: uploads
