@@ -1,1 +1,1 @@
-web: gunicorn wsgi:app 
+web: PYTHONPATH=/opt/render/project/src gunicorn api.app:app 
