@@ -2,10 +2,24 @@ services:
   - type: web
     name: video-stitcher
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      apt-get update && apt-get install -y build-essential python3-dev
+      pip install --upgrade pip
+      pip install wheel setuptools
+      pip install -r requirements.txt
     startCommand: gunicorn api.app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.9.0
       - key: PYTHONPATH
-        value: /opt/render/project/src/video_stitcher_app 
+        value: /opt/render/project/src/video_stitcher_app
+    healthCheckPath: /api/status
+    autoDeploy: true
+    disk:
+      name: uploads
+      mountPath: /tmp/uploads
+      sizeGB: 10
+    disk:
+      name: outputs
+      mountPath: /tmp/outputs
+      sizeGB: 10 
