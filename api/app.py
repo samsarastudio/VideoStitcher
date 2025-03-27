@@ -93,11 +93,15 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         with processing_lock:
             active_processes += 1
         
-        # Update job status
-        processing_jobs[job_id]['status'] = 'processing'
-        processing_jobs[job_id]['start_time'] = datetime.now().isoformat()
-        processing_jobs[job_id]['progress'] = 0
-        processing_jobs[job_id]['stage'] = 'initializing'
+        # Update job status with more details
+        processing_jobs[job_id].update({
+            'id': job_id,
+            'status': 'processing',
+            'start_time': datetime.now().isoformat(),
+            'progress': 0,
+            'stage': 'initializing',
+            'message': 'Starting video processing...'
+        })
         
         # Process videos
         stitcher = VideoStitcher(wwe_path, fan_path)
@@ -105,11 +109,13 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
         
         if success:
-            processing_jobs[job_id]['status'] = 'completed'
-            processing_jobs[job_id]['end_time'] = datetime.now().isoformat()
-            processing_jobs[job_id]['message'] = message
-            processing_jobs[job_id]['progress'] = 1.0
-            processing_jobs[job_id]['stage'] = 'completed'
+            processing_jobs[job_id].update({
+                'status': 'completed',
+                'end_time': datetime.now().isoformat(),
+                'message': message,
+                'progress': 1.0,
+                'stage': 'completed'
+            })
             # Clean up uploaded files
             os.remove(wwe_path)
             os.remove(fan_path)
@@ -123,12 +129,15 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             raise VideoProcessingError(message)
             
     except Exception as e:
-        processing_jobs[job_id]['status'] = 'failed'
-        processing_jobs[job_id]['end_time'] = datetime.now().isoformat()
-        processing_jobs[job_id]['error'] = str(e)
-        processing_jobs[job_id]['traceback'] = traceback.format_exc()
-        processing_jobs[job_id]['progress'] = 0
-        processing_jobs[job_id]['stage'] = 'failed'
+        processing_jobs[job_id].update({
+            'status': 'failed',
+            'end_time': datetime.now().isoformat(),
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'progress': 0,
+            'stage': 'failed',
+            'message': f'Processing failed: {str(e)}'
+        })
         logging.error(f"Error processing job {job_id}: {str(e)}")
         
         # Add to recent jobs
@@ -169,15 +178,41 @@ def get_jobs():
     """Get active and recent jobs"""
     try:
         with processing_lock:
-            active_jobs = [
-                job for job in processing_jobs.values()
-                if job['status'] in ['queued', 'processing']
-            ]
+            active_jobs = []
+            for job_id, job in processing_jobs.items():
+                if job['status'] in ['queued', 'processing']:
+                    job_info = {
+                        'id': job_id,
+                        'status': job['status'],
+                        'created_at': job['created_at'],
+                        'start_time': job.get('start_time'),
+                        'progress': job.get('progress', 0),
+                        'stage': job.get('stage', 'queued'),
+                        'message': job.get('message', ''),
+                        'error': job.get('error', '')
+                    }
+                    active_jobs.append(job_info)
+            
+            recent_job_details = []
+            for job in recent_jobs:
+                job_info = {
+                    'id': job.get('id'),
+                    'status': job['status'],
+                    'created_at': job['created_at'],
+                    'start_time': job.get('start_time'),
+                    'end_time': job.get('end_time'),
+                    'progress': job.get('progress', 0),
+                    'stage': job.get('stage', 'completed'),
+                    'message': job.get('message', ''),
+                    'error': job.get('error', '')
+                }
+                recent_job_details.append(job_info)
             
             return jsonify({
                 'success': True,
                 'active_jobs': active_jobs,
-                'recent_jobs': recent_jobs
+                'recent_jobs': recent_job_details,
+                'server_time': datetime.now().isoformat()
             })
     except Exception as e:
         logging.error(f"Error getting jobs: {str(e)}")
@@ -241,11 +276,15 @@ def stitch_videos():
                 'message': 'Processing queue is full. Please try again later.'
             }), 503
 
-        # Initialize job status
+        # Initialize job status with more details
         processing_jobs[job_id] = {
+            'id': job_id,
             'status': 'queued',
             'created_at': datetime.now().isoformat(),
-            'output_file': output_filename
+            'output_file': output_filename,
+            'progress': 0,
+            'stage': 'queued',
+            'message': 'Job queued for processing'
         }
 
         # Add job to queue

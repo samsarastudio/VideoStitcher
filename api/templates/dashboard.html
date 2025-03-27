@@ -36,6 +36,68 @@
             color: #666;
             margin-top: 2px;
         }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .server-status {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-available {
+            background-color: #4CAF50;
+        }
+        .status-busy {
+            background-color: #FFC107;
+        }
+        .section {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .job-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            background-color: #f9f9f9;
+        }
+        .log-section {
+            background-color: #1e1e1e;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .timestamp {
+            color: #888;
+            font-size: 0.9em;
+        }
+        .error-text {
+            color: #ff4444;
+        }
+        .success-text {
+            color: #4CAF50;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -94,101 +156,153 @@
     </div>
 
     <script>
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) return 'Invalid Date';
+                return date.toLocaleString();
+            } catch (e) {
+                return 'Invalid Date';
+            }
+        }
+
+        function formatDuration(startDate, endDate) {
+            if (!startDate || !endDate) return 'N/A';
+            try {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                const durationMs = end - start;
+                const seconds = Math.floor(durationMs / 1000);
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = seconds % 60;
+                return `${minutes}m ${remainingSeconds}s`;
+            } catch (e) {
+                return 'N/A';
+            }
+        }
+
         function getStageDisplay(stage) {
-            const stages = {
-                'initializing': 'Initializing...',
+            const stageMap = {
+                'queued': 'Queued',
+                'initializing': 'Initializing',
                 'loading_videos': 'Loading Videos',
-                'processing': 'Processing Videos',
+                'processing': 'Processing',
                 'merging': 'Merging Videos',
-                'adding_audio': 'Adding Audio',
                 'finalizing': 'Finalizing',
                 'completed': 'Completed',
                 'failed': 'Failed'
             };
-            return stages[stage] || stage;
+            return stageMap[stage] || stage;
         }
 
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('active-processes').textContent = data.active_processes;
-                        document.getElementById('max-processes').textContent = data.max_concurrent_processes;
-                        document.getElementById('queue-size').textContent = data.queue_size;
-                        document.getElementById('max-queue').textContent = data.max_queue_size;
-                        document.getElementById('server-status-text').textContent = data.server_status;
-                        document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
-                        
-                        // Update status indicator
-                        const indicator = document.getElementById('server-status-indicator');
-                        indicator.className = 'status-indicator me-2';
-                        indicator.style.width = '10px';
-                        indicator.style.height = '10px';
-                        indicator.style.borderRadius = '50%';
-                        indicator.style.backgroundColor = data.server_status === 'available' ? '#28a745' : '#dc3545';
-                    }
-                })
-                .catch(error => console.error('Error fetching status:', error));
+        function updateJobDisplay(job, container) {
+            const jobElement = document.createElement('div');
+            jobElement.className = 'job-item';
+            
+            const status = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+            const createdAt = formatDate(job.created_at);
+            const startTime = formatDate(job.start_time);
+            const endTime = job.end_time ? formatDate(job.end_time) : 'N/A';
+            const duration = job.start_time && job.end_time ? 
+                formatDuration(job.start_time, job.end_time) : 'N/A';
+            
+            let content = `
+                <div><strong>Job ID:</strong> ${job.id || 'undefined'}</div>
+                <div><strong>Status:</strong> ${status}</div>
+                <div><strong>Created:</strong> ${createdAt}</div>
+                <div><strong>Started:</strong> ${startTime}</div>
+            `;
+
+            if (job.status === 'processing' || job.status === 'queued') {
+                const progress = (job.progress || 0) * 100;
+                const stage = getStageDisplay(job.stage || 'queued');
+                content += `
+                    <div class="progress">
+                        <div class="progress-bar" style="width: ${progress}%">
+                            <div class="stage-text">${stage} - ${progress.toFixed(1)}%</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (job.message) {
+                content += `<div class="log-section">${job.message}</div>`;
+            }
+
+            if (job.error) {
+                content += `<div class="log-section error-text">${job.error}</div>`;
+            }
+
+            if (job.status === 'completed' || job.status === 'failed') {
+                content += `
+                    <div><strong>Completed:</strong> ${endTime}</div>
+                    <div><strong>Duration:</strong> ${duration}</div>
+                `;
+            }
+
+            jobElement.innerHTML = content;
+            container.appendChild(jobElement);
         }
 
-        function updateJobs() {
+        function updateDashboard() {
             fetch('/api/jobs')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
                         // Update active jobs
-                        const activeJobsHtml = data.active_jobs.map(job => `
-                            <div class="mb-3">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>${job.job_id}</strong>
-                                        <span class="badge bg-primary status-badge">${job.status}</span>
-                                    </div>
-                                    <small class="text-muted">Started: ${new Date(job.start_time).toLocaleTimeString()}</small>
-                                </div>
-                                ${job.status === 'processing' ? `
-                                    <div class="progress">
-                                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
-                                             role="progressbar" 
-                                             style="width: ${job.progress * 100}%"
-                                             aria-valuenow="${job.progress * 100}" 
-                                             aria-valuemin="0" 
-                                             aria-valuemax="100">
-                                            ${Math.round(job.progress * 100)}%
-                                        </div>
-                                    </div>
-                                    <div class="stage-text">${getStageDisplay(job.stage)}</div>
-                                ` : ''}
-                            </div>
-                        `).join('');
-                        document.getElementById('active-jobs').innerHTML = activeJobsHtml || '<div class="text-center">No active jobs</div>';
+                        const activeJobsContainer = document.getElementById('active-jobs');
+                        activeJobsContainer.innerHTML = '';
+                        if (data.active_jobs.length > 0) {
+                            data.active_jobs.forEach(job => {
+                                updateJobDisplay(job, activeJobsContainer);
+                            });
+                        } else {
+                            activeJobsContainer.innerHTML = 'No active jobs';
+                        }
 
                         // Update recent jobs
-                        const recentJobsHtml = data.recent_jobs.map(job => `
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <div>
-                                    <strong>${job.job_id}</strong>
-                                    <span class="badge ${job.status === 'completed' ? 'bg-success' : job.status === 'failed' ? 'bg-danger' : 'bg-secondary'} status-badge">${job.status}</span>
-                                </div>
-                                <small class="text-muted">Completed: ${new Date(job.end_time).toLocaleTimeString()}</small>
-                            </div>
-                        `).join('');
-                        document.getElementById('recent-jobs').innerHTML = recentJobsHtml || '<div class="text-center">No recent jobs</div>';
+                        const recentJobsContainer = document.getElementById('recent-jobs');
+                        recentJobsContainer.innerHTML = '';
+                        if (data.recent_jobs.length > 0) {
+                            data.recent_jobs.forEach(job => {
+                                updateJobDisplay(job, recentJobsContainer);
+                            });
+                        } else {
+                            recentJobsContainer.innerHTML = 'No recent jobs';
+                        }
+
+                        // Update last updated time
+                        document.getElementById('last-update').textContent = 
+                            formatDate(data.server_time);
                     }
                 })
                 .catch(error => console.error('Error fetching jobs:', error));
+
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const statusIndicator = document.getElementById('server-status-indicator');
+                        const serverStatus = document.getElementById('server-status-text');
+                        
+                        statusIndicator.className = 'status-indicator me-2 ' + 
+                            (data.server_status === 'available' ? 'status-available' : 'status-busy');
+                        serverStatus.textContent = data.server_status.charAt(0).toUpperCase() + 
+                            data.server_status.slice(1);
+                        
+                        document.getElementById('active-processes').textContent = data.active_processes;
+                        document.getElementById('max-processes').textContent = data.max_concurrent_processes;
+                        document.getElementById('queue-size').textContent = data.queue_size;
+                        document.getElementById('max-queue').textContent = data.max_queue_size;
+                    }
+                })
+                .catch(error => console.error('Error fetching status:', error));
         }
 
-        // Update every 2 seconds for smoother progress updates
-        setInterval(() => {
-            updateStatus();
-            updateJobs();
-        }, 2000);
-
-        // Initial update
-        updateStatus();
-        updateJobs();
+        // Update dashboard every 2 seconds
+        updateDashboard();
+        setInterval(updateDashboard, 2000);
     </script>
 </body>
 </html> 
