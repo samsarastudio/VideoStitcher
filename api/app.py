@@ -140,7 +140,12 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         # Process videos
         stitcher = VideoStitcher(wwe_path, fan_path)
         update_job_progress(job_id, 0.1, 'loading_videos')
-        success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
+        
+        # Add error handling for video stitching
+        try:
+            success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
+        except Exception as e:
+            raise Exception(f"Error during video stitching: {str(e)}")
         
         if success:
             # Validate output video
@@ -154,7 +159,7 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             # Validate output video is playable
             cap = cv2.VideoCapture(output_path)
             if not cap.isOpened():
-                raise Exception("Output video is not a valid video file")
+                raise Exception("Generated video is not valid")
             cap.release()
             
             processing_jobs[job_id].update({
@@ -555,58 +560,37 @@ def preview_video(job_id):
 def download_video(job_id):
     """Download a processed video"""
     try:
-        # Check if job exists and is completed
-        if job_id not in processing_jobs:
-            return jsonify({
-                'success': False,
-                'message': 'Job not found'
-            }), 404
-
-        job = processing_jobs[job_id]
-        if job['status'] != 'completed':
-            return jsonify({
-                'success': False,
-                'message': 'Video not ready for download'
-            }), 400
-
         output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
         
-        # Validate output file exists and is valid
         if not os.path.exists(output_path):
             return jsonify({
                 'success': False,
-                'message': 'Output file not found'
+                'message': 'Video not found'
             }), 404
             
+        # Validate the video file
+        cap = cv2.VideoCapture(output_path)
+        if not cap.isOpened():
+            return jsonify({
+                'success': False,
+                'message': 'Invalid video file'
+            }), 400
+        cap.release()
+        
         # Check file size
         file_size = os.path.getsize(output_path)
         if file_size < 10 * 1024 * 1024:  # Less than 10MB
             return jsonify({
                 'success': False,
-                'message': 'Output file is invalid or corrupted'
+                'message': 'Video file is too small or invalid'
             }), 400
-            
-        # Validate video is playable
-        cap = cv2.VideoCapture(output_path)
-        if not cap.isOpened():
-            return jsonify({
-                'success': False,
-                'message': 'Output file is not a valid video'
-            }), 400
-        cap.release()
-
-        # Get original filename
-        original_filename = f"stitched_video_{job_id}.mp4"
-        if 'original_fan_filename' in job:
-            original_filename = f"stitched_{job['original_fan_filename']}"
-
+        
         return send_file(
             output_path,
+            mimetype='video/mp4',
             as_attachment=True,
-            download_name=original_filename,
-            mimetype='video/mp4'
+            download_name=f"stitched_video_{job_id}.mp4"
         )
-
     except Exception as e:
         logging.error(f"Error downloading video: {str(e)}")
         return jsonify({
