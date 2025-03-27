@@ -10,7 +10,7 @@ services:
     startCommand: gunicorn api.app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.0
+        value: 3.9.18
       - key: PYTHONPATH
         value: /opt/render/project/src/video_stitcher_app
     healthCheckPath: /api/status
