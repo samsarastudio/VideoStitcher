@@ -256,10 +256,9 @@ def stitch_videos():
 
         # Generate unique filenames and job ID
         job_id = str(uuid.uuid4())
-        unique_id = str(uuid.uuid4())
-        wwe_filename = secure_filename(f"wwe_{unique_id}_{wwe_video.filename}")
-        fan_filename = secure_filename(f"fan_{unique_id}_{fan_video.filename}")
-        output_filename = f"output_{unique_id}.mp4"
+        wwe_filename = secure_filename(f"wwe_{job_id}_{wwe_video.filename}")
+        fan_filename = secure_filename(f"fan_{job_id}_{fan_video.filename}")
+        output_filename = f"output_{job_id}.mp4"
 
         # Save uploaded files
         wwe_path = os.path.join(UPLOAD_FOLDER, wwe_filename)
@@ -282,6 +281,8 @@ def stitch_videos():
             'status': 'queued',
             'created_at': datetime.now().isoformat(),
             'output_file': output_filename,
+            'wwe_filename': wwe_filename,
+            'fan_filename': fan_filename,
             'progress': 0,
             'stage': 'queued',
             'message': 'Job queued for processing'
@@ -332,27 +333,48 @@ def get_job_status(job_id):
             'message': f'Error getting job status: {str(e)}'
         }), 500
 
-@app.route('/api/download/<filename>', methods=['GET'])
-def download_video(filename):
+@app.route('/api/download/<job_id>', methods=['GET'])
+def download_video(job_id):
+    """Download the processed video for a specific job"""
     try:
-        file_path = os.path.join(OUTPUT_FOLDER, filename)
+        if job_id not in processing_jobs:
+            return jsonify({
+                'success': False,
+                'message': 'Job not found'
+            }), 404
+
+        job = processing_jobs[job_id]
+        if job['status'] != 'completed':
+            return jsonify({
+                'success': False,
+                'message': 'Video is not ready for download'
+            }), 400
+
+        output_filename = job.get('output_file')
+        if not output_filename:
+            return jsonify({
+                'success': False,
+                'message': 'Output file not found'
+            }), 404
+
+        file_path = os.path.join(OUTPUT_FOLDER, output_filename)
         if not os.path.exists(file_path):
             return jsonify({
                 'success': False,
-                'message': 'File not found'
+                'message': 'Output file does not exist'
             }), 404
             
         return send_file(
             file_path,
             as_attachment=True,
-            download_name=filename
+            download_name=f"stitched_video_{job_id}.mp4"
         )
     except Exception as e:
-        logging.error(f"Error downloading file: {str(e)}")
+        logging.error(f"Error downloading video for job {job_id}: {str(e)}")
         return jsonify({
             'success': False,
-            'message': f'Error downloading file: {str(e)}'
-        }), 404
+            'message': f'Error downloading video: {str(e)}'
+        }), 500
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
@@ -391,15 +413,15 @@ def start_job(job_id):
                 'message': 'Job is not in queued state'
             }), 400
 
-        # Start processing the job
-        wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
-        fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
-        output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+        # Get the original filenames from the job data
+        wwe_path = os.path.join(UPLOAD_FOLDER, job.get('wwe_filename'))
+        fan_path = os.path.join(UPLOAD_FOLDER, job.get('fan_filename'))
+        output_path = os.path.join(OUTPUT_FOLDER, job.get('output_file'))
 
         if not (os.path.exists(wwe_path) and os.path.exists(fan_path)):
             return jsonify({
                 'success': False,
-                'message': 'Video files not found'
+                'message': 'Video files not found. The files may have been cleaned up or deleted.'
             }), 400
 
         # Add job to processing queue
@@ -444,15 +466,22 @@ def stop_job(job_id):
 
         # Clean up any temporary files
         try:
-            wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
-            fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
-            output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+            wwe_path = os.path.join(UPLOAD_FOLDER, job.get('wwe_filename'))
+            fan_path = os.path.join(UPLOAD_FOLDER, job.get('fan_filename'))
+            output_path = os.path.join(OUTPUT_FOLDER, job.get('output_file'))
             
             for path in [wwe_path, fan_path, output_path]:
                 if os.path.exists(path):
                     os.remove(path)
         except Exception as e:
             logging.error(f"Error cleaning up files for job {job_id}: {str(e)}")
+
+        # Add to recent jobs if it was in processing state
+        if job['status'] == 'processing':
+            with processing_lock:
+                recent_jobs.insert(0, job.copy())
+                if len(recent_jobs) > MAX_RECENT_JOBS:
+                    recent_jobs.pop()
 
         return jsonify({
             'success': True,
@@ -484,9 +513,9 @@ def stop_all_jobs():
 
                     # Clean up any temporary files
                     try:
-                        wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
-                        fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
-                        output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+                        wwe_path = os.path.join(UPLOAD_FOLDER, job.get('wwe_filename'))
+                        fan_path = os.path.join(UPLOAD_FOLDER, job.get('fan_filename'))
+                        output_path = os.path.join(OUTPUT_FOLDER, job.get('output_file'))
                         
                         for path in [wwe_path, fan_path, output_path]:
                             if os.path.exists(path):
