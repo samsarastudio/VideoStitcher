@@ -1,0 +1,8 @@
+include requirements.txt
+include setup.py
+include README.md
+include video_stitcher.log
+include static/uploads/.gitkeep
+include static/outputs/.gitkeep
+recursive-include api/templates *
+recursive-include core * 
