@@ -515,6 +515,37 @@ def get_folders():
             'message': str(e)
         }), 500
 
+@app.route('/api/files/<path:filename>', methods=['DELETE'])
+def delete_file(filename):
+    try:
+        # Ensure the file path is within allowed directories
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_FOLDER)):
+            return jsonify({'success': False, 'message': 'Invalid file path'}), 400
+
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            return jsonify({'success': True, 'message': 'File deleted successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'File not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/files/<path:filename>', methods=['GET'])
+def download_file(filename):
+    try:
+        # Ensure the file path is within allowed directories
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_FOLDER)):
+            return jsonify({'success': False, 'message': 'Invalid file path'}), 400
+
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True)
+        else:
+            return jsonify({'success': False, 'message': 'File not found'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 # Schedule cleanup task
 def schedule_cleanup():
     while True:
