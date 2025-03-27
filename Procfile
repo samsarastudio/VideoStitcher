@@ -1,1 +1,1 @@
-web: PYTHONPATH=/opt/render/project/src gunicorn api.app:app 
+web: PYTHONPATH=/opt/render/project/src/video_stitcher_app gunicorn api.app:app 
