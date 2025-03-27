@@ -32,7 +32,7 @@ class VideoStitcher:
         # Set transition duration
         self.transition_duration = 0.5  # seconds
 
-    def create_video_segments(self):
+    def create_video_segments(self, progress_callback=None):
         """
         Create video segments according to the specified timing with fade transitions
         """
@@ -53,8 +53,14 @@ class VideoStitcher:
             (25, 30, "wwe")   # 25s - 30s: Final WWE video
         ]
         
+        total_segments = len(segment_timings)
+        
         # Create segments based on timing
         for i, (start_time, end_time, video_type) in enumerate(segment_timings):
+            if progress_callback:
+                progress = 0.1 + (i / total_segments) * 0.3  # 10% to 40% progress
+                progress_callback(progress, 'processing')
+            
             if video_type == "wwe":
                 segment = self.wwe_video.subclip(start_time, min(end_time, wwe_duration))
             else:  # fan video
@@ -72,13 +78,19 @@ class VideoStitcher:
         
         return segments
 
-    def stitch_videos(self, output_path):
+    def stitch_videos(self, output_path, progress_callback=None):
         """
         Stitch all video segments together with commentary audio
         """
         try:
+            if progress_callback:
+                progress_callback(0.0, 'initializing')
+            
             # Create video segments
-            segments = self.create_video_segments()
+            segments = self.create_video_segments(progress_callback)
+            
+            if progress_callback:
+                progress_callback(0.4, 'merging')
             
             # Concatenate all video segments
             final_video = concatenate_videoclips(segments)
@@ -86,8 +98,14 @@ class VideoStitcher:
             # Ensure final video has correct frame rate
             final_video = final_video.set_fps(self.target_fps)
             
+            if progress_callback:
+                progress_callback(0.6, 'adding_audio')
+            
             # Set the commentary audio for the entire duration
             final_video = final_video.set_audio(self.commentary)
+            
+            if progress_callback:
+                progress_callback(0.8, 'finalizing')
             
             # Write the final video
             final_video.write_videofile(
@@ -105,7 +123,12 @@ class VideoStitcher:
             self.fan_video.close()
             self.commentary.close()
             
+            if progress_callback:
+                progress_callback(1.0, 'completed')
+            
             return True, "Video stitching completed successfully"
             
         except Exception as e:
+            if progress_callback:
+                progress_callback(0.0, 'failed')
             return False, f"Error during video stitching: {str(e)}" 

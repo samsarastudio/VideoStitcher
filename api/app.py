@@ -79,6 +79,12 @@ def check_file_size(file):
     file.seek(0)  # Reset file pointer
     return size <= MAX_FILE_SIZE_MB
 
+def update_job_progress(job_id: str, progress: float, stage: str):
+    """Update the progress of a job"""
+    if job_id in processing_jobs:
+        processing_jobs[job_id]['progress'] = progress
+        processing_jobs[job_id]['stage'] = stage
+
 def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: str):
     """Process a video job"""
     global active_processes
@@ -90,15 +96,20 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         # Update job status
         processing_jobs[job_id]['status'] = 'processing'
         processing_jobs[job_id]['start_time'] = datetime.now().isoformat()
+        processing_jobs[job_id]['progress'] = 0
+        processing_jobs[job_id]['stage'] = 'initializing'
         
         # Process videos
         stitcher = VideoStitcher(wwe_path, fan_path)
-        success, message = stitcher.stitch_videos(output_path)
+        update_job_progress(job_id, 0.1, 'loading_videos')
+        success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
         
         if success:
             processing_jobs[job_id]['status'] = 'completed'
             processing_jobs[job_id]['end_time'] = datetime.now().isoformat()
             processing_jobs[job_id]['message'] = message
+            processing_jobs[job_id]['progress'] = 1.0
+            processing_jobs[job_id]['stage'] = 'completed'
             # Clean up uploaded files
             os.remove(wwe_path)
             os.remove(fan_path)
@@ -116,6 +127,8 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         processing_jobs[job_id]['end_time'] = datetime.now().isoformat()
         processing_jobs[job_id]['error'] = str(e)
         processing_jobs[job_id]['traceback'] = traceback.format_exc()
+        processing_jobs[job_id]['progress'] = 0
+        processing_jobs[job_id]['stage'] = 'failed'
         logging.error(f"Error processing job {job_id}: {str(e)}")
         
         # Add to recent jobs
