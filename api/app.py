@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, redirect, url_for, session
 from werkzeug.utils import secure_filename
 import os
 from core.video_stitcher import VideoStitcher
@@ -12,6 +12,12 @@ from typing import Dict, Optional, List
 import traceback
 from threading import Thread
 import pickle
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +30,29 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-here')  # Required for session
+
+# Google Drive configuration
+GOOGLE_DRIVE_CREDENTIALS = os.path.join(os.getenv('RENDER_TEMP_DIR', '/tmp'), 'google_drive_credentials.pkl')
+GOOGLE_DRIVE_TOKEN = os.path.join(os.getenv('RENDER_TEMP_DIR', '/tmp'), 'google_drive_token.json')
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+# Load Google Drive credentials from environment
+GOOGLE_DRIVE_CLIENT_CONFIG = {
+    "web": {
+        "client_id": os.environ.get('GOOGLE_DRIVE_CLIENT_ID'),
+        "project_id": os.environ.get('GOOGLE_DRIVE_PROJECT_ID'),
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret": os.environ.get('GOOGLE_DRIVE_CLIENT_SECRET'),
+        "redirect_uris": [os.environ.get('GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:5000/oauth2callback')]
+    }
+}
+
+# Save client config to file
+with open(GOOGLE_DRIVE_TOKEN, 'w') as f:
+    json.dump(GOOGLE_DRIVE_CLIENT_CONFIG, f)
 
 # Configure upload folder using Render's environment
 UPLOAD_FOLDER = os.path.join(os.getenv('RENDER_TEMP_DIR', '/tmp'), 'uploads')
@@ -463,6 +492,83 @@ def stop_all_jobs():
             'message': f'Error stopping jobs: {str(e)}'
         }), 500
 
+@app.route('/auth')
+def auth():
+    """Start Google Drive authentication"""
+    service, auth_url = get_drive_service()
+    if auth_url:
+        return redirect(auth_url)
+    return redirect(url_for('dashboard'))
+
+@app.route('/oauth2callback')
+def oauth2callback():
+    """Handle Google Drive OAuth callback"""
+    state = session['state']
+    flow = Flow.from_client_config_file(GOOGLE_DRIVE_TOKEN, SCOPES, state=state)
+    flow.redirect_uri = os.environ.get('GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:5000/oauth2callback')
+    
+    authorization_response = request.url
+    flow.fetch_token(authorization_response=authorization_response)
+    credentials = flow.credentials
+    
+    with open(GOOGLE_DRIVE_CREDENTIALS, 'wb') as token:
+        pickle.dump(credentials, token)
+    
+    return redirect(url_for('dashboard'))
+
+@app.route('/api/drive/upload/<job_id>', methods=['POST'])
+def upload_to_drive(job_id):
+    """Upload a file to Google Drive"""
+    try:
+        if job_id not in processing_jobs:
+            return jsonify({'success': False, 'message': 'Job not found'}), 404
+
+        job = processing_jobs[job_id]
+        if job['status'] != 'completed':
+            return jsonify({'success': False, 'message': 'Video is not ready for upload'}), 400
+
+        output_filename = job.get('output_file')
+        if not output_filename:
+            return jsonify({'success': False, 'message': 'Output file not found'}), 404
+
+        file_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'message': 'Output file does not exist'}), 404
+
+        service, auth_url = get_drive_service()
+        if auth_url:
+            return jsonify({'success': False, 'message': 'Google Drive not authenticated'}), 401
+
+        file_metadata = {
+            'name': f"stitched_video_{job_id}.mp4",
+            'mimeType': 'video/mp4'
+        }
+
+        media = MediaFileUpload(
+            file_path,
+            mimetype='video/mp4',
+            resumable=True
+        )
+
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+
+        # Update job with Drive URL
+        job['drive_url'] = file.get('webViewLink')
+        
+        return jsonify({
+            'success': True,
+            'message': 'File uploaded to Google Drive',
+            'drive_url': file.get('webViewLink')
+        })
+
+    except Exception as e:
+        logging.error(f"Error uploading to Drive: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/drive/status', methods=['GET'])
 def get_drive_status():
     """Check if Google Drive is connected"""
@@ -516,6 +622,10 @@ def get_folders():
                     'modified': stat.st_mtime,
                     'path': file_path
                 }
+                
+                # Extract job ID from filename (assuming format: job_id.mp4)
+                job_id = os.path.splitext(filename)[0]
+                file_info['job_id'] = job_id
                 
                 # Check if file has a Drive URL in any job
                 for job in processing_jobs.values():
@@ -575,6 +685,31 @@ def schedule_cleanup():
     while True:
         cleanup_old_files()
         time.sleep(3600)  # Run cleanup every hour
+
+def get_drive_service():
+    """Get or create Google Drive service"""
+    creds = None
+    if os.path.exists(GOOGLE_DRIVE_CREDENTIALS):
+        with open(GOOGLE_DRIVE_CREDENTIALS, 'rb') as token:
+            creds = pickle.load(token)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = Flow.from_client_config_file(GOOGLE_DRIVE_TOKEN, SCOPES)
+            flow.redirect_uri = os.environ.get('GOOGLE_DRIVE_REDIRECT_URI', 'http://localhost:5000/oauth2callback')
+            authorization_url, state = flow.authorization_url(
+                access_type='offline',
+                include_granted_scopes='true'
+            )
+            session['state'] = state
+            return None, authorization_url
+        
+        with open(GOOGLE_DRIVE_CREDENTIALS, 'wb') as token:
+            pickle.dump(creds, token)
+    
+    return build('drive', 'v3', credentials=creds), None
 
 if __name__ == '__main__':
     # Start cleanup thread

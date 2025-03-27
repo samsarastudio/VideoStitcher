@@ -378,6 +378,12 @@
                 driveBtn.textContent = 'View in Drive';
                 driveBtn.onclick = () => window.open(file.drive_url, '_blank');
                 actions.appendChild(driveBtn);
+            } else if (file.job_id) {
+                const uploadBtn = document.createElement('button');
+                uploadBtn.className = 'file-btn drive-btn';
+                uploadBtn.textContent = 'Upload to Drive';
+                uploadBtn.onclick = () => uploadToDrive(file.job_id);
+                actions.appendChild(uploadBtn);
             }
             
             actions.appendChild(downloadBtn);
@@ -557,6 +563,26 @@
                 .catch(error => {
                     console.error('Error checking Drive status:', error);
                 });
+        }
+
+        async function uploadToDrive(jobId) {
+            try {
+                const response = await fetch(`/api/drive/upload/${jobId}`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.message || 'Upload failed');
+                }
+                
+                const data = await response.json();
+                alert('File uploaded to Google Drive successfully!');
+                refreshFolderStructure();
+            } catch (error) {
+                console.error('Error uploading to Drive:', error);
+                alert('Failed to upload to Google Drive: ' + error.message);
+            }
         }
 
         function refreshAll() {
