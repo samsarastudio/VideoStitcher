@@ -38,8 +38,8 @@ setup(
     install_requires=[
         'flask==2.0.1',
         'gunicorn==20.1.0',
-        'opencv-python-headless==4.8.0.74',
-        'numpy>=1.24.0',
+        'numpy==1.23.5',
+        'opencv-python-headless==4.7.0.72',
         'werkzeug==2.0.1',
         'python-dotenv==0.19.0',
         'moviepy==1.0.3'
