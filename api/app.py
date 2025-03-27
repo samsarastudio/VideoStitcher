@@ -11,6 +11,7 @@ import logging
 from typing import Dict, Optional, List
 import traceback
 from threading import Thread
+import pickle
 
 # Configure logging
 logging.basicConfig(
@@ -462,54 +463,77 @@ def stop_all_jobs():
             'message': f'Error stopping jobs: {str(e)}'
         }), 500
 
-@app.route('/api/folders', methods=['GET'])
-def get_folders():
-    """Get the current folder structure of the server"""
+@app.route('/api/drive/status', methods=['GET'])
+def get_drive_status():
+    """Check if Google Drive is connected"""
     try:
-        folders = {
-            'uploads': {
-                'path': UPLOAD_FOLDER,
-                'exists': os.path.exists(UPLOAD_FOLDER),
-                'files': []
-            },
-            'outputs': {
-                'path': OUTPUT_FOLDER,
-                'exists': os.path.exists(OUTPUT_FOLDER),
-                'files': []
-            }
-        }
-
-        # Get files in uploads folder
-        if folders['uploads']['exists']:
-            folders['uploads']['files'] = [
-                {
-                    'name': f,
-                    'size': os.path.getsize(os.path.join(UPLOAD_FOLDER, f)),
-                    'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(UPLOAD_FOLDER, f))).isoformat()
-                }
-                for f in os.listdir(UPLOAD_FOLDER)
-                if os.path.isfile(os.path.join(UPLOAD_FOLDER, f))
-            ]
-
-        # Get files in outputs folder
-        if folders['outputs']['exists']:
-            folders['outputs']['files'] = [
-                {
-                    'name': f,
-                    'size': os.path.getsize(os.path.join(OUTPUT_FOLDER, f)),
-                    'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(OUTPUT_FOLDER, f))).isoformat()
-                }
-                for f in os.listdir(OUTPUT_FOLDER)
-                if os.path.isfile(os.path.join(OUTPUT_FOLDER, f))
-            ]
-
+        if os.path.exists(GOOGLE_DRIVE_CREDENTIALS):
+            with open(GOOGLE_DRIVE_CREDENTIALS, 'rb') as token:
+                creds = pickle.load(token)
+                if creds and creds.valid:
+                    return jsonify({
+                        'success': True,
+                        'connected': True
+                    })
         return jsonify({
             'success': True,
-            'folders': folders
+            'connected': False
         })
-
     except Exception as e:
-        logging.error(f"Error getting folder structure: {str(e)}")
+        logging.error(f"Error checking Drive status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/folders', methods=['GET'])
+def get_folders():
+    """Get folder structure with Drive URLs"""
+    try:
+        uploads = []
+        outputs = []
+        
+        # Get uploads
+        for filename in os.listdir(UPLOAD_FOLDER):
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.isfile(file_path):
+                stat = os.stat(file_path)
+                uploads.append({
+                    'name': filename,
+                    'size': stat.st_size,
+                    'modified': stat.st_mtime,
+                    'path': file_path
+                })
+        
+        # Get outputs with Drive URLs
+        for filename in os.listdir(OUTPUT_FOLDER):
+            file_path = os.path.join(OUTPUT_FOLDER, filename)
+            if os.path.isfile(file_path):
+                stat = os.stat(file_path)
+                file_info = {
+                    'name': filename,
+                    'size': stat.st_size,
+                    'modified': stat.st_mtime,
+                    'path': file_path
+                }
+                
+                # Check if file has a Drive URL in any job
+                for job in processing_jobs.values():
+                    if job.get('output_file') == filename and job.get('drive_url'):
+                        file_info['drive_url'] = job['drive_url']
+                        break
+                
+                outputs.append(file_info)
+        
+        return jsonify({
+            'success': True,
+            'folders': {
+                'uploads': {'files': uploads},
+                'outputs': {'files': outputs}
+            }
+        })
+    except Exception as e:
+        logging.error(f"Error getting folders: {str(e)}")
         return jsonify({
             'success': False,
             'message': str(e)

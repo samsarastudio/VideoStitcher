@@ -230,45 +230,106 @@
         .refresh-button {
             float: right;
         }
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .drive-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 10px;
+        }
+        .status-indicator.connected {
+            background-color: #4CAF50;
+        }
+        .status-indicator.disconnected {
+            background-color: #f44336;
+        }
+        .folder-actions {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .file-info {
+            flex-grow: 1;
+        }
+        .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .file-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .download-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .delete-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        .drive-btn {
+            background-color: #4285f4;
+            color: white;
+        }
+        .file-btn:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>Video Stitcher Dashboard</h1>
-        </div>
-
-        <div class="section">
-            <h2>Server Status</h2>
-            <div id="status-info">
-                <p>Loading status...</p>
+            <div class="header-actions">
+                <button class="button" onclick="window.location.href='/auth'" id="drive-auth-btn">Connect Google Drive</button>
+                <button class="button" onclick="refreshAll()">Refresh All</button>
             </div>
         </div>
 
-        <div class="section">
-            <h2>Folder Structure</h2>
-            <button class="button refresh-button" onclick="refreshFolders()">Refresh</button>
-            <div class="folder-structure" id="folder-structure">
-                <div class="folder">
-                    <div class="folder-header">Uploads Folder</div>
-                    <ul class="file-list" id="uploads-list">
-                        <li>Loading...</li>
-                    </ul>
-                </div>
-                <div class="folder">
-                    <div class="folder-header">Outputs Folder</div>
-                    <ul class="file-list" id="outputs-list">
-                        <li>Loading...</li>
-                    </ul>
+        <div class="server-status">
+            <h3>Server Status</h3>
+            <div id="server-status-content">
+                Loading status...
+            </div>
+        </div>
+
+        <div class="folder-structure">
+            <h3>Folder Structure</h3>
+            <div class="folder-actions">
+                <button onclick="refreshFolderStructure()" class="refresh-btn">Refresh</button>
+                <div class="drive-status" id="drive-status">
+                    <span class="status-indicator"></span>
+                    <span class="status-text">Checking Drive connection...</span>
                 </div>
             </div>
+            <div id="folder-content">
+                <div class="folder-section">
+                    <h4>Uploads</h4>
+                    <div id="uploads-files"></div>
+                </div>
+                <div class="folder-section">
+                    <h4>Outputs</h4>
+                    <div id="outputs-files"></div>
+                </div>
+            </div>
         </div>
 
-        <div class="section">
-            <h2>Active Jobs</h2>
-            <div id="active-jobs">
-                <p>Loading jobs...</p>
-            </div>
+        <div class="active-jobs">
+            <h3>Active Jobs</h3>
+            <div id="active-jobs"></div>
         </div>
     </div>
 
@@ -310,6 +371,14 @@
             deleteBtn.className = 'file-btn delete-btn';
             deleteBtn.textContent = 'Delete';
             deleteBtn.onclick = () => deleteFile(file.name);
+            
+            if (file.drive_url) {
+                const driveBtn = document.createElement('button');
+                driveBtn.className = 'file-btn drive-btn';
+                driveBtn.textContent = 'View in Drive';
+                driveBtn.onclick = () => window.open(file.drive_url, '_blank');
+                actions.appendChild(driveBtn);
+            }
             
             actions.appendChild(downloadBtn);
             actions.appendChild(deleteBtn);
@@ -383,7 +452,7 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        document.getElementById('status-info').innerHTML = `
+                        document.getElementById('server-status-content').innerHTML = `
                             <p>Active Processes: ${data.active_processes}/${data.max_concurrent_processes}</p>
                             <p>Queue Size: ${data.queue_size}/${data.max_queue_size}</p>
                             <p>Server Status: <span class="status-badge status-${data.server_status}">${data.server_status}</span></p>
@@ -467,17 +536,40 @@
             `).join('');
         }
 
-        // Initial load
-        refreshFolders();
-        updateStatus();
-        updateJobs();
+        function checkDriveStatus() {
+            fetch('/api/drive/status')
+                .then(response => response.json())
+                .then(data => {
+                    const statusIndicator = document.querySelector('.status-indicator');
+                    const statusText = document.querySelector('.status-text');
+                    const driveAuthBtn = document.getElementById('drive-auth-btn');
+                    
+                    if (data.connected) {
+                        statusIndicator.className = 'status-indicator connected';
+                        statusText.textContent = 'Connected to Google Drive';
+                        driveAuthBtn.style.display = 'none';
+                    } else {
+                        statusIndicator.className = 'status-indicator disconnected';
+                        statusText.textContent = 'Not connected to Google Drive';
+                        driveAuthBtn.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking Drive status:', error);
+                });
+        }
 
-        // Refresh every 5 seconds
-        setInterval(() => {
-            refreshFolders();
-            updateStatus();
+        function refreshAll() {
+            checkDriveStatus();
+            refreshServerStatus();
+            refreshFolderStructure();
             updateJobs();
-        }, 5000);
+        }
+
+        // Initial load
+        refreshAll();
+        // Set up periodic refresh
+        setInterval(refreshAll, 5000);
     </script>
 </body>
 </html> 
