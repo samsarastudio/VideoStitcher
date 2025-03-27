@@ -3,7 +3,9 @@ services:
     name: video-stitcher
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    startCommand: gunicorn api.app:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0 
+        value: 3.11.0
+      - key: PYTHONPATH
+        value: /opt/render/project/src/video_stitcher_app 
