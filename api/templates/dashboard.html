@@ -287,315 +287,295 @@
         .file-btn:hover {
             opacity: 0.9;
         }
+        .job-card {
+            margin-bottom: 1rem;
+            transition: all 0.3s ease;
+        }
+        .job-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .progress {
+            height: 20px;
+        }
+        .control-panel {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .status-badge {
+            font-size: 0.8rem;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Video Stitcher Dashboard</h1>
-            <div class="header-actions">
-                <button class="button" onclick="window.location.href='/auth'" id="drive-auth-btn">Connect Google Drive</button>
-                <button class="button" onclick="refreshAll()">Refresh All</button>
-            </div>
-        </div>
-
-        <div class="server-status">
-            <h3>Server Status</h3>
-            <div id="server-status-content">
-                Loading status...
-            </div>
-        </div>
-
-        <div class="folder-structure">
-            <h3>Folder Structure</h3>
-            <div class="folder-actions">
-                <button onclick="refreshFolderStructure()" class="refresh-btn">Refresh</button>
-                <div class="drive-status" id="drive-status">
-                    <span class="status-indicator"></span>
-                    <span class="status-text">Checking Drive connection...</span>
+    <div class="container mt-4">
+        <h1 class="mb-4">Video Stitcher Dashboard</h1>
+        
+        <!-- Control Panel -->
+        <div class="control-panel">
+            <h3>Process Controls</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <button class="btn btn-success me-2" onclick="startAllJobs()">Start All Jobs</button>
+                    <button class="btn btn-danger me-2" onclick="stopAllJobs()">Stop All Jobs</button>
                 </div>
-            </div>
-            <div id="folder-content">
-                <div class="folder-section">
-                    <h4>Uploads</h4>
-                    <div id="uploads-files"></div>
-                </div>
-                <div class="folder-section">
-                    <h4>Outputs</h4>
-                    <div id="outputs-files"></div>
+                <div class="col-md-6">
+                    <button class="btn btn-warning me-2" onclick="deleteAllOutputs()">Delete All Outputs</button>
+                    <button class="btn btn-primary" onclick="downloadAllOutputs()">Download All Outputs</button>
                 </div>
             </div>
         </div>
 
-        <div class="active-jobs">
-            <h3>Active Jobs</h3>
-            <div id="active-jobs"></div>
+        <!-- Server Status -->
+        <div class="alert alert-info" id="serverStatus">
+            Server Status: Checking...
+        </div>
+
+        <!-- Active Jobs -->
+        <h2 class="mt-4">Active Jobs</h2>
+        <div id="activeJobs" class="row">
+            <!-- Jobs will be inserted here -->
+        </div>
+
+        <!-- Recent Jobs -->
+        <h2 class="mt-4">Recent Jobs</h2>
+        <div id="recentJobs" class="row">
+            <!-- Jobs will be inserted here -->
         </div>
     </div>
 
     <script>
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        // Job status polling interval (in milliseconds)
+        const POLL_INTERVAL = 2000;
+        let pollTimer = null;
+
+        // Format date
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleString();
         }
 
-        function formatDate(timestamp) {
-            return new Date(timestamp * 1000).toLocaleString();
-        }
+        // Create job card HTML
+        function createJobCard(job) {
+            const statusClass = {
+                'queued': 'bg-secondary',
+                'processing': 'bg-primary',
+                'completed': 'bg-success',
+                'failed': 'bg-danger',
+                'stopped': 'bg-warning',
+                'paused': 'bg-info'
+            }[job.status] || 'bg-secondary';
 
-        function createFileElement(file) {
-            const div = document.createElement('div');
-            div.className = 'file-item';
-            
-            const info = document.createElement('div');
-            info.className = 'file-info';
-            info.innerHTML = `
-                <div>${file.name}</div>
-                <div style="font-size: 0.8em; color: #666;">
-                    ${formatFileSize(file.size)} • ${formatDate(file.modified)}
+            return `
+                <div class="col-md-6">
+                    <div class="card job-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Job ${job.id.slice(0, 8)}</h5>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge ${statusClass} status-badge">${job.status}</span>
+                                <small class="text-muted">Created: ${formatDate(job.created_at)}</small>
+                            </div>
+                            <div class="progress mb-2">
+                                <div class="progress-bar ${statusClass}" role="progressbar" 
+                                     style="width: ${job.progress * 100}%">
+                                    ${Math.round(job.progress * 100)}%
+                                </div>
+                            </div>
+                            <p class="card-text">Stage: ${job.stage}</p>
+                            ${job.error ? `<p class="text-danger">Error: ${job.error}</p>` : ''}
+                            <div class="btn-group">
+                                ${job.status === 'queued' || job.status === 'paused' || job.status === 'stopped' 
+                                    ? `<button class="btn btn-sm btn-success" onclick="startJob('${job.id}')">Start</button>` 
+                                    : ''}
+                                ${job.status === 'processing' || job.status === 'queued'
+                                    ? `<button class="btn btn-sm btn-danger" onclick="stopJob('${job.id}')">Stop</button>` 
+                                    : ''}
+                                ${job.status === 'processing'
+                                    ? `<button class="btn btn-sm btn-warning" onclick="pauseJob('${job.id}')">Pause</button>` 
+                                    : ''}
+                                ${job.status === 'paused'
+                                    ? `<button class="btn btn-sm btn-info" onclick="resumeJob('${job.id}')">Resume</button>` 
+                                    : ''}
+                                ${job.status === 'completed'
+                                    ? `<button class="btn btn-sm btn-primary" onclick="downloadVideo('${job.id}')">Download</button>` 
+                                    : ''}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
-            
-            const actions = document.createElement('div');
-            actions.className = 'file-actions';
-            
-            const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'file-btn download-btn';
-            downloadBtn.textContent = 'Download';
-            downloadBtn.onclick = () => downloadFile(file.name);
-            
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'file-btn delete-btn';
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.onclick = () => deleteFile(file.name);
-            
-            if (file.drive_url) {
-                const driveBtn = document.createElement('button');
-                driveBtn.className = 'file-btn drive-btn';
-                driveBtn.textContent = 'View in Drive';
-                driveBtn.onclick = () => window.open(file.drive_url, '_blank');
-                actions.appendChild(driveBtn);
-            } else if (file.job_id) {
-                const uploadBtn = document.createElement('button');
-                uploadBtn.className = 'file-btn drive-btn';
-                uploadBtn.textContent = 'Upload to Drive';
-                uploadBtn.onclick = () => uploadToDrive(file.job_id);
-                actions.appendChild(uploadBtn);
-            }
-            
-            actions.appendChild(downloadBtn);
-            actions.appendChild(deleteBtn);
-            
-            div.appendChild(info);
-            div.appendChild(actions);
-            return div;
         }
 
-        async function downloadFile(filename) {
+        // Update server status
+        async function updateServerStatus() {
             try {
-                const response = await fetch(`/api/files/${encodeURIComponent(filename)}`);
-                if (!response.ok) {
-                    throw new Error('Download failed');
-                }
-                
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-            } catch (error) {
-                console.error('Error downloading file:', error);
-                alert('Failed to download file');
-            }
-        }
-
-        async function deleteFile(filename) {
-            if (!confirm(`Are you sure you want to delete ${filename}?`)) {
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api/files/${encodeURIComponent(filename)}`, {
-                    method: 'DELETE'
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Delete failed');
-                }
-                
-                refreshFolderStructure();
-            } catch (error) {
-                console.error('Error deleting file:', error);
-                alert('Failed to delete file');
-            }
-        }
-
-        function updateFolderStructure(data) {
-            const uploadsDiv = document.getElementById('uploads-files');
-            const outputsDiv = document.getElementById('outputs-files');
-            
-            uploadsDiv.innerHTML = '';
-            outputsDiv.innerHTML = '';
-            
-            data.uploads.forEach(file => {
-                uploadsDiv.appendChild(createFileElement(file));
-            });
-            
-            data.outputs.forEach(file => {
-                outputsDiv.appendChild(createFileElement(file));
-            });
-        }
-
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('server-status-content').innerHTML = `
-                            <p>Active Processes: ${data.active_processes}/${data.max_concurrent_processes}</p>
-                            <p>Queue Size: ${data.queue_size}/${data.max_queue_size}</p>
-                            <p>Server Status: <span class="status-badge status-${data.server_status}">${data.server_status}</span></p>
-                        `;
-                    }
-                })
-                .catch(error => console.error('Error fetching status:', error));
-        }
-
-        function updateJobs() {
-            fetch('/api/jobs')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const jobsHtml = data.active_jobs.map(job => `
-                            <div class="job-item">
-                                <h3>Job ${job.id}</h3>
-                                <p>Status: <span class="status-badge status-${job.status}">${job.status}</span></p>
-                                <p>Stage: ${job.stage}</p>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: ${job.progress * 100}%"></div>
-                                </div>
-                                <p>Progress: ${Math.round(job.progress * 100)}%</p>
-                                <button class="button" onclick="startJob('${job.id}')">Start</button>
-                                <button class="button danger" onclick="stopJob('${job.id}')">Stop</button>
-                            </div>
-                        `).join('');
-                        document.getElementById('active-jobs').innerHTML = jobsHtml;
-                    }
-                })
-                .catch(error => console.error('Error fetching jobs:', error));
-        }
-
-        function startJob(jobId) {
-            fetch(`/api/job/${jobId}/start`, { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        updateJobs();
-                    }
-                })
-                .catch(error => console.error('Error starting job:', error));
-        }
-
-        function stopJob(jobId) {
-            fetch(`/api/job/${jobId}/stop`, { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        updateJobs();
-                    }
-                })
-                .catch(error => console.error('Error stopping job:', error));
-        }
-
-        function refreshFolders() {
-            fetch('/api/folders')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        updateFolderList('uploads-list', data.folders.uploads.files);
-                        updateFolderList('outputs-list', data.folders.outputs.files);
-                    }
-                })
-                .catch(error => console.error('Error fetching folders:', error));
-        }
-
-        function updateFolderList(listId, files) {
-            const list = document.getElementById(listId);
-            if (files.length === 0) {
-                list.innerHTML = '<li>No files</li>';
-                return;
-            }
-            list.innerHTML = files.map(file => `
-                <li class="file-item">
-                    <span>${file.name}</span>
-                    <span class="file-info">
-                        ${formatFileSize(file.size)} | ${formatDate(file.modified)}
-                    </span>
-                </li>
-            `).join('');
-        }
-
-        function checkDriveStatus() {
-            fetch('/api/drive/status')
-                .then(response => response.json())
-                .then(data => {
-                    const statusIndicator = document.querySelector('.status-indicator');
-                    const statusText = document.querySelector('.status-text');
-                    const driveAuthBtn = document.getElementById('drive-auth-btn');
-                    
-                    if (data.connected) {
-                        statusIndicator.className = 'status-indicator connected';
-                        statusText.textContent = 'Connected to Google Drive';
-                        driveAuthBtn.style.display = 'none';
-                    } else {
-                        statusIndicator.className = 'status-indicator disconnected';
-                        statusText.textContent = 'Not connected to Google Drive';
-                        driveAuthBtn.style.display = 'block';
-                    }
-                })
-                .catch(error => {
-                    console.error('Error checking Drive status:', error);
-                });
-        }
-
-        async function uploadToDrive(jobId) {
-            try {
-                const response = await fetch(`/api/drive/upload/${jobId}`, {
-                    method: 'POST'
-                });
-                
-                if (!response.ok) {
-                    const data = await response.json();
-                    throw new Error(data.message || 'Upload failed');
-                }
-                
+                const response = await fetch('/api/status');
                 const data = await response.json();
-                alert('File uploaded to Google Drive successfully!');
-                refreshFolderStructure();
+                if (data.success) {
+                    document.getElementById('serverStatus').innerHTML = `
+                        Server Status: ${data.server_status}<br>
+                        Active Processes: ${data.active_processes}/${data.max_concurrent_processes}<br>
+                        Queue Size: ${data.queue_size}/${data.max_queue_size}
+                    `;
+                }
             } catch (error) {
-                console.error('Error uploading to Drive:', error);
-                alert('Failed to upload to Google Drive: ' + error.message);
+                console.error('Error updating server status:', error);
             }
         }
 
-        function refreshAll() {
-            checkDriveStatus();
-            refreshServerStatus();
-            refreshFolderStructure();
-            updateJobs();
+        // Update jobs display
+        async function updateJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('activeJobs').innerHTML = data.active_jobs.map(createJobCard).join('');
+                    document.getElementById('recentJobs').innerHTML = data.recent_jobs.map(createJobCard).join('');
+                }
+            } catch (error) {
+                console.error('Error updating jobs:', error);
+            }
         }
 
-        // Initial load
-        refreshAll();
-        // Set up periodic refresh
-        setInterval(refreshAll, 5000);
+        // Job control functions
+        async function startJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/start`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error starting job:', error);
+                alert('Error starting job');
+            }
+        }
+
+        async function stopJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/stop`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error stopping job:', error);
+                alert('Error stopping job');
+            }
+        }
+
+        async function pauseJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/pause`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error pausing job:', error);
+                alert('Error pausing job');
+            }
+        }
+
+        async function resumeJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/resume`, { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error resuming job:', error);
+                alert('Error resuming job');
+            }
+        }
+
+        async function downloadVideo(jobId) {
+            window.location.href = `/api/download/${jobId}`;
+        }
+
+        // Global control functions
+        async function startAllJobs() {
+            try {
+                const response = await fetch('/api/jobs/start_all', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error starting all jobs:', error);
+                alert('Error starting all jobs');
+            }
+        }
+
+        async function stopAllJobs() {
+            try {
+                const response = await fetch('/api/jobs/stop_all', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error stopping all jobs:', error);
+                alert('Error stopping all jobs');
+            }
+        }
+
+        async function deleteAllOutputs() {
+            if (!confirm('Are you sure you want to delete all output files?')) {
+                return;
+            }
+            try {
+                const response = await fetch('/api/jobs/delete_all', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    updateJobs();
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error('Error deleting all outputs:', error);
+                alert('Error deleting all outputs');
+            }
+        }
+
+        function downloadAllOutputs() {
+            window.location.href = '/api/jobs/download_all';
+        }
+
+        // Start polling
+        function startPolling() {
+            updateServerStatus();
+            updateJobs();
+            pollTimer = setInterval(() => {
+                updateServerStatus();
+                updateJobs();
+            }, POLL_INTERVAL);
+        }
+
+        // Stop polling when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(pollTimer);
+            } else {
+                startPolling();
+            }
+        });
+
+        // Start initial polling
+        startPolling();
     </script>
 </body>
 </html> 
