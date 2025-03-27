@@ -38,7 +38,8 @@
         }
         body {
             font-family: Arial, sans-serif;
-            margin: 20px;
+            margin: 0;
+            padding: 20px;
             background-color: #f5f5f5;
         }
         h1 {
@@ -134,288 +135,235 @@
         .btn-download:hover {
             background-color: #0056b3;
         }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .folder-structure {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .folder {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .folder-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .file-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-info {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .status-queued { background: #ffd700; color: #000; }
+        .status-processing { background: #3498db; color: white; }
+        .status-completed { background: #2ecc71; color: white; }
+        .status-failed { background: #e74c3c; color: white; }
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            transition: width 0.3s ease;
+        }
+        .button {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 4px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:hover {
+            background: #2980b9;
+        }
+        .button.danger {
+            background: #e74c3c;
+        }
+        .button.danger:hover {
+            background: #c0392b;
+        }
+        .refresh-button {
+            float: right;
+        }
     </style>
 </head>
-<body class="bg-light">
-    <div class="container py-4">
-        <h1 class="mb-4">Video Stitcher Dashboard</h1>
-        
-        <!-- Server Status Card -->
-        <div class="card status-card mb-4">
-            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                <h5 class="card-title mb-0">Server Status</h5>
-                <button id="stopAllBtn" class="btn btn-danger btn-sm">Stop All Processes</button>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Video Stitcher Dashboard</h1>
+        </div>
+
+        <div class="section">
+            <h2>Server Status</h2>
+            <div id="status-info">
+                <p>Loading status...</p>
             </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-3">
-                        <div class="d-flex align-items-center">
-                            <div class="status-indicator me-2" id="server-status-indicator"></div>
-                            <span id="server-status-text">Loading...</span>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <p class="mb-0">Active Processes: <span id="active-processes">-</span>/<span id="max-processes">-</span></p>
-                    </div>
-                    <div class="col-md-3">
-                        <p class="mb-0">Queue Size: <span id="queue-size">-</span>/<span id="max-queue">-</span></p>
-                    </div>
-                    <div class="col-md-3">
-                        <p class="mb-0 refresh-time">Last Updated: <span id="last-update">-</span></p>
-                    </div>
+        </div>
+
+        <div class="section">
+            <h2>Folder Structure</h2>
+            <button class="button refresh-button" onclick="refreshFolders()">Refresh</button>
+            <div class="folder-structure" id="folder-structure">
+                <div class="folder">
+                    <div class="folder-header">Uploads Folder</div>
+                    <ul class="file-list" id="uploads-list">
+                        <li>Loading...</li>
+                    </ul>
+                </div>
+                <div class="folder">
+                    <div class="folder-header">Outputs Folder</div>
+                    <ul class="file-list" id="outputs-list">
+                        <li>Loading...</li>
+                    </ul>
                 </div>
             </div>
         </div>
 
-        <!-- Active Jobs Card -->
-        <div class="card status-card mb-4">
-            <div class="card-header bg-success text-white">
-                <h5 class="card-title mb-0">Active Jobs</h5>
-            </div>
-            <div class="card-body">
-                <div class="job-list" id="active-jobs">
-                    <div class="text-center">Loading active jobs...</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Recent Jobs Card -->
-        <div class="card status-card">
-            <div class="card-header bg-info text-white">
-                <h5 class="card-title mb-0">Recent Jobs</h5>
-            </div>
-            <div class="card-body">
-                <div class="job-list" id="recent-jobs">
-                    <div class="text-center">Loading recent jobs...</div>
-                </div>
+        <div class="section">
+            <h2>Active Jobs</h2>
+            <div id="active-jobs">
+                <p>Loading jobs...</p>
             </div>
         </div>
     </div>
 
     <script>
-        function formatDate(dateString) {
-            if (!dateString) return 'N/A';
-            try {
-                const date = new Date(dateString);
-                if (isNaN(date.getTime())) return 'Invalid Date';
-                return date.toLocaleString();
-            } catch (e) {
-                return 'Invalid Date';
-            }
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-        function formatDuration(startDate, endDate) {
-            if (!startDate || !endDate) return 'N/A';
-            try {
-                const start = new Date(startDate);
-                const end = new Date(endDate);
-                const durationMs = end - start;
-                const seconds = Math.floor(durationMs / 1000);
-                const minutes = Math.floor(seconds / 60);
-                const remainingSeconds = seconds % 60;
-                return `${minutes}m ${remainingSeconds}s`;
-            } catch (e) {
-                return 'N/A';
-            }
+        function formatDate(isoString) {
+            return new Date(isoString).toLocaleString();
         }
 
-        function getStageDisplay(stage) {
-            const stageMap = {
-                'queued': 'Queued',
-                'initializing': 'Initializing',
-                'loading_videos': 'Loading Videos',
-                'processing': 'Processing',
-                'merging': 'Merging Videos',
-                'finalizing': 'Finalizing',
-                'completed': 'Completed',
-                'failed': 'Failed'
-            };
-            return stageMap[stage] || stage;
-        }
-
-        function updateJobDisplay(job, container) {
-            const jobElement = document.createElement('div');
-            jobElement.className = 'job-item';
-            
-            const status = job.status.charAt(0).toUpperCase() + job.status.slice(1);
-            const createdAt = formatDate(job.created_at);
-            const startTime = formatDate(job.start_time);
-            const endTime = job.end_time ? formatDate(job.end_time) : 'N/A';
-            const duration = job.start_time && job.end_time ? 
-                formatDuration(job.start_time, job.end_time) : 'N/A';
-            
-            let content = `
-                <div><strong>Job ID:</strong> ${job.id || 'undefined'}</div>
-                <div><strong>Status:</strong> ${status}</div>
-                <div><strong>Created:</strong> ${createdAt}</div>
-                <div><strong>Started:</strong> ${startTime}</div>
-            `;
-
-            if (job.status === 'processing' || job.status === 'queued') {
-                const progress = (job.progress || 0) * 100;
-                const stage = getStageDisplay(job.stage || 'queued');
-                content += `
-                    <div class="progress">
-                        <div class="progress-bar" style="width: ${progress}%">
-                            <div class="stage-text">${stage} - ${progress.toFixed(1)}%</div>
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (job.message) {
-                content += `<div class="log-section">${job.message}</div>`;
-            }
-
-            if (job.error) {
-                content += `<div class="log-section error-text">${job.error}</div>`;
-            }
-
-            if (job.status === 'completed' || job.status === 'failed') {
-                content += `
-                    <div><strong>Completed:</strong> ${endTime}</div>
-                    <div><strong>Duration:</strong> ${duration}</div>
-                `;
-            }
-
-            // Add action buttons
-            content += `
-                <div class="action-buttons">
-                    <button class="btn-start" onclick="startJob('${job.id}')" 
-                            ${job.status !== 'queued' ? 'disabled' : ''}>
-                        Start Process
-                    </button>
-                    <button class="btn-stop" onclick="stopJob('${job.id}')"
-                            ${!['processing', 'queued'].includes(job.status) ? 'disabled' : ''}>
-                        Stop Process
-                    </button>
-                    ${job.status === 'completed' ? `
-                        <button class="btn-download" onclick="downloadVideo('${job.id}')">
-                            Download Video
-                        </button>
-                    ` : ''}
-                </div>
-            `;
-
-            jobElement.innerHTML = content;
-            container.appendChild(jobElement);
-        }
-
-        // Add download function
-        function downloadVideo(jobId) {
-            window.location.href = `/api/download/${jobId}`;
-        }
-
-        // Add job control functions
-        async function startJob(jobId) {
-            try {
-                const response = await fetch(`/api/job/${jobId}/start`, {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                if (!data.success) {
-                    alert(`Failed to start job: ${data.message}`);
-                }
-                updateDashboard();
-            } catch (error) {
-                console.error('Error starting job:', error);
-                alert('Failed to start job. Check console for details.');
-            }
-        }
-
-        async function stopJob(jobId) {
-            try {
-                const response = await fetch(`/api/job/${jobId}/stop`, {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                if (!data.success) {
-                    alert(`Failed to stop job: ${data.message}`);
-                }
-                updateDashboard();
-            } catch (error) {
-                console.error('Error stopping job:', error);
-                alert('Failed to stop job. Check console for details.');
-            }
-        }
-
-        async function stopAllProcesses() {
-            try {
-                const response = await fetch('/api/jobs/stop-all', {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                if (!data.success) {
-                    alert(`Failed to stop all processes: ${data.message}`);
-                }
-                updateDashboard();
-            } catch (error) {
-                console.error('Error stopping all processes:', error);
-                alert('Failed to stop all processes. Check console for details.');
-            }
-        }
-
-        // Add event listener for stop all button
-        document.getElementById('stopAllBtn').addEventListener('click', stopAllProcesses);
-
-        function updateDashboard() {
-            fetch('/api/jobs')
+        function refreshFolders() {
+            fetch('/api/folders')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        // Update active jobs
-                        const activeJobsContainer = document.getElementById('active-jobs');
-                        activeJobsContainer.innerHTML = '';
-                        if (data.active_jobs.length > 0) {
-                            data.active_jobs.forEach(job => {
-                                updateJobDisplay(job, activeJobsContainer);
-                            });
-                        } else {
-                            activeJobsContainer.innerHTML = 'No active jobs';
-                        }
-
-                        // Update recent jobs
-                        const recentJobsContainer = document.getElementById('recent-jobs');
-                        recentJobsContainer.innerHTML = '';
-                        if (data.recent_jobs.length > 0) {
-                            data.recent_jobs.forEach(job => {
-                                updateJobDisplay(job, recentJobsContainer);
-                            });
-                        } else {
-                            recentJobsContainer.innerHTML = 'No recent jobs';
-                        }
-
-                        // Update last updated time
-                        document.getElementById('last-update').textContent = 
-                            formatDate(data.server_time);
+                        updateFolderList('uploads-list', data.folders.uploads.files);
+                        updateFolderList('outputs-list', data.folders.outputs.files);
                     }
                 })
-                .catch(error => console.error('Error fetching jobs:', error));
+                .catch(error => console.error('Error fetching folders:', error));
+        }
 
+        function updateFolderList(listId, files) {
+            const list = document.getElementById(listId);
+            if (files.length === 0) {
+                list.innerHTML = '<li>No files</li>';
+                return;
+            }
+            list.innerHTML = files.map(file => `
+                <li class="file-item">
+                    <span>${file.name}</span>
+                    <span class="file-info">
+                        ${formatFileSize(file.size)} | ${formatDate(file.modified)}
+                    </span>
+                </li>
+            `).join('');
+        }
+
+        function updateStatus() {
             fetch('/api/status')
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        const statusIndicator = document.getElementById('server-status-indicator');
-                        const serverStatus = document.getElementById('server-status-text');
-                        
-                        statusIndicator.className = 'status-indicator me-2 ' + 
-                            (data.server_status === 'available' ? 'status-available' : 'status-busy');
-                        serverStatus.textContent = data.server_status.charAt(0).toUpperCase() + 
-                            data.server_status.slice(1);
-                        
-                        document.getElementById('active-processes').textContent = data.active_processes;
-                        document.getElementById('max-processes').textContent = data.max_concurrent_processes;
-                        document.getElementById('queue-size').textContent = data.queue_size;
-                        document.getElementById('max-queue').textContent = data.max_queue_size;
+                        document.getElementById('status-info').innerHTML = `
+                            <p>Active Processes: ${data.active_processes}/${data.max_concurrent_processes}</p>
+                            <p>Queue Size: ${data.queue_size}/${data.max_queue_size}</p>
+                            <p>Server Status: <span class="status-badge status-${data.server_status}">${data.server_status}</span></p>
+                        `;
                     }
                 })
                 .catch(error => console.error('Error fetching status:', error));
         }
 
-        // Update dashboard every 2 seconds
-        updateDashboard();
-        setInterval(updateDashboard, 2000);
+        function updateJobs() {
+            fetch('/api/jobs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const jobsHtml = data.active_jobs.map(job => `
+                            <div class="job-item">
+                                <h3>Job ${job.id}</h3>
+                                <p>Status: <span class="status-badge status-${job.status}">${job.status}</span></p>
+                                <p>Stage: ${job.stage}</p>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${job.progress * 100}%"></div>
+                                </div>
+                                <p>Progress: ${Math.round(job.progress * 100)}%</p>
+                                <button class="button" onclick="startJob('${job.id}')">Start</button>
+                                <button class="button danger" onclick="stopJob('${job.id}')">Stop</button>
+                            </div>
+                        `).join('');
+                        document.getElementById('active-jobs').innerHTML = jobsHtml;
+                    }
+                })
+                .catch(error => console.error('Error fetching jobs:', error));
+        }
+
+        function startJob(jobId) {
+            fetch(`/api/job/${jobId}/start`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateJobs();
+                    }
+                })
+                .catch(error => console.error('Error starting job:', error));
+        }
+
+        function stopJob(jobId) {
+            fetch(`/api/job/${jobId}/stop`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateJobs();
+                    }
+                })
+                .catch(error => console.error('Error stopping job:', error));
+        }
+
+        // Initial load
+        refreshFolders();
+        updateStatus();
+        updateJobs();
+
+        // Refresh every 5 seconds
+        setInterval(() => {
+            refreshFolders();
+            updateStatus();
+            updateJobs();
+        }, 5000);
     </script>
 </body>
 </html> 

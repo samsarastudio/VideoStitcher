@@ -462,6 +462,59 @@ def stop_all_jobs():
             'message': f'Error stopping jobs: {str(e)}'
         }), 500
 
+@app.route('/api/folders', methods=['GET'])
+def get_folders():
+    """Get the current folder structure of the server"""
+    try:
+        folders = {
+            'uploads': {
+                'path': UPLOAD_FOLDER,
+                'exists': os.path.exists(UPLOAD_FOLDER),
+                'files': []
+            },
+            'outputs': {
+                'path': OUTPUT_FOLDER,
+                'exists': os.path.exists(OUTPUT_FOLDER),
+                'files': []
+            }
+        }
+
+        # Get files in uploads folder
+        if folders['uploads']['exists']:
+            folders['uploads']['files'] = [
+                {
+                    'name': f,
+                    'size': os.path.getsize(os.path.join(UPLOAD_FOLDER, f)),
+                    'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(UPLOAD_FOLDER, f))).isoformat()
+                }
+                for f in os.listdir(UPLOAD_FOLDER)
+                if os.path.isfile(os.path.join(UPLOAD_FOLDER, f))
+            ]
+
+        # Get files in outputs folder
+        if folders['outputs']['exists']:
+            folders['outputs']['files'] = [
+                {
+                    'name': f,
+                    'size': os.path.getsize(os.path.join(OUTPUT_FOLDER, f)),
+                    'modified': datetime.fromtimestamp(os.path.getmtime(os.path.join(OUTPUT_FOLDER, f))).isoformat()
+                }
+                for f in os.listdir(OUTPUT_FOLDER)
+                if os.path.isfile(os.path.join(OUTPUT_FOLDER, f))
+            ]
+
+        return jsonify({
+            'success': True,
+            'folders': folders
+        })
+
+    except Exception as e:
+        logging.error(f"Error getting folder structure: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
 # Schedule cleanup task
 def schedule_cleanup():
     while True:
