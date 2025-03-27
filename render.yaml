@@ -6,6 +6,7 @@ services:
       apt-get update && apt-get install -y build-essential python3-dev
       pip install --upgrade pip
       pip install wheel setuptools
+      pip install numpy==1.21.6 --only-binary :all:
       pip install -r requirements.txt
     startCommand: gunicorn api.app:app
     envVars:
