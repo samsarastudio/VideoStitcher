@@ -353,23 +353,51 @@
                 <h5 class="mb-0">Upload Videos</h5>
             </div>
             <div class="card-body">
-                <form id="uploadForm" class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">WWE Video</label>
-                        <input type="file" class="form-control" name="wwe_video" accept="video/*" required>
-                        <div class="form-text">Maximum file size: 100MB</div>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Fan Video</label>
-                        <input type="file" class="form-control" name="fan_video" accept="video/*" required>
-                        <div class="form-text">Maximum file size: 100MB</div>
-                    </div>
-                    <div class="col-12">
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-upload me-2"></i>Upload and Process
-                        </button>
-                    </div>
-                </form>
+                <!-- Default WWE Video Status -->
+                <div class="alert alert-info mb-4" id="wweVideoStatus">
+                    <i class="fas fa-spinner fa-spin me-2"></i>Checking default WWE video...
+                </div>
+
+                <!-- Single Video Upload -->
+                <div class="mb-4">
+                    <h6 class="mb-3">Quick Upload (Using Default WWE Video)</h6>
+                    <form id="singleUploadForm" class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label">Fan Video</label>
+                            <input type="file" class="form-control" name="fan_video" accept="video/*" required>
+                            <div class="form-text">Maximum file size: 100MB</div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-upload me-2"></i>Upload and Process
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <hr class="my-4">
+
+                <!-- Two Video Upload -->
+                <div>
+                    <h6 class="mb-3">Custom Upload (Both Videos)</h6>
+                    <form id="uploadForm" class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">WWE Video</label>
+                            <input type="file" class="form-control" name="wwe_video" accept="video/*" required>
+                            <div class="form-text">Maximum file size: 100MB</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Fan Video</label>
+                            <input type="file" class="form-control" name="fan_video" accept="video/*" required>
+                            <div class="form-text">Maximum file size: 100MB</div>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-secondary">
+                                <i class="fas fa-upload me-2"></i>Upload Both Videos
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
 
@@ -392,14 +420,14 @@
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0">Recent Jobs</h5>
-            </div>
+                </div>
             <div class="card-body">
                 <div id="recentJobs" class="row">
                     <!-- Recent jobs will be inserted here -->
                 </div>
+                </div>
             </div>
         </div>
-    </div>
 
     <!-- Preview Modal -->
     <div id="previewModal" class="preview-modal">
@@ -417,8 +445,63 @@
         let currentJobs = new Set();
         let refreshInterval;
 
+        // Check WWE video status
+        async function checkWweVideo() {
+            try {
+                const response = await fetch('/api/check_wwe_video');
+                const data = await response.json();
+                
+                const statusElement = document.getElementById('wweVideoStatus');
+                if (data.success) {
+                    statusElement.className = 'alert alert-success';
+                    statusElement.innerHTML = `
+                        <i class="fas fa-check-circle me-2"></i>
+                        Default WWE video is available (${data.size.toFixed(1)} MB)
+                    `;
+                } else {
+                    statusElement.className = 'alert alert-warning';
+                    statusElement.innerHTML = `
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        ${data.message}
+                    `;
+                }
+            } catch (error) {
+                console.error('Error checking WWE video:', error);
+                document.getElementById('wweVideoStatus').innerHTML = `
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Error checking WWE video status
+                `;
+            }
+        }
+
+        // Handle single video upload
+        document.getElementById('singleUploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            
+            try {
+                const response = await fetch('/api/stitch_single', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showAlert('success', 'Video uploaded successfully! Processing started.');
+                    this.reset();
+                    refreshJobs();
+                } else {
+                    showAlert('danger', data.message || 'Upload failed');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error uploading video');
+                console.error('Upload error:', error);
+            }
+        });
+
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
+            checkWweVideo();
             refreshJobs();
             refreshInterval = setInterval(refreshJobs, 5000);
         });

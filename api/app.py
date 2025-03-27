@@ -34,6 +34,7 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-here')  # R
 RENDER_TEMP_DIR = os.getenv('RENDER_TEMP_DIR', '/tmp')
 UPLOAD_FOLDER = os.path.join(RENDER_TEMP_DIR, 'uploads')
 OUTPUT_FOLDER = os.path.join(RENDER_TEMP_DIR, 'outputs')
+DEFAULT_WWE_VIDEO = os.path.join(UPLOAD_FOLDER, 'wwe_video.mp4')
 MAX_FILE_SIZE_MB = 100
 MAX_FILE_AGE_HOURS = 24
 MAX_CONCURRENT_PROCESSES = 2
@@ -47,6 +48,7 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # Log directory paths for debugging
 logging.info(f"Upload folder: {UPLOAD_FOLDER}")
 logging.info(f"Output folder: {OUTPUT_FOLDER}")
+logging.info(f"Default WWE video: {DEFAULT_WWE_VIDEO}")
 
 # Global state
 processing_jobs: Dict[str, dict] = {}
@@ -218,18 +220,19 @@ def get_jobs():
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():
     try:
-        if 'fan_video' not in request.files:
-            return jsonify({'success': False, 'message': 'Fan video is required'})
+        if 'wwe_video' not in request.files or 'fan_video' not in request.files:
+            return jsonify({'success': False, 'message': 'Both WWE and fan videos are required'})
 
+        wwe_video = request.files['wwe_video']
         fan_video = request.files['fan_video']
 
-        if fan_video.filename == '':
-            return jsonify({'success': False, 'message': 'No selected file'})
+        if wwe_video.filename == '' or fan_video.filename == '':
+            return jsonify({'success': False, 'message': 'No selected files'})
 
-        if not allowed_file(fan_video.filename):
+        if not allowed_file(wwe_video.filename) or not allowed_file(fan_video.filename):
             return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
 
-        if not check_file_size(fan_video):
+        if not check_file_size(wwe_video) or not check_file_size(fan_video):
             return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
 
         # Generate a unique job ID
@@ -239,14 +242,12 @@ def stitch_videos():
         job_dir = os.path.join(UPLOAD_FOLDER, job_id)
         os.makedirs(job_dir, exist_ok=True)
 
-        # Save uploaded fan video with original name
+        # Save uploaded files with original names
+        wwe_path = os.path.join(job_dir, secure_filename(wwe_video.filename))
         fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
+        
+        wwe_video.save(wwe_path)
         fan_video.save(fan_path)
-
-        # Use the main WWE video from the server
-        wwe_path = os.path.join(UPLOAD_FOLDER, 'wwe_video.mp4')
-        if not os.path.exists(wwe_path):
-            return jsonify({'success': False, 'message': 'Main WWE video not found on server'})
 
         # Add job to queue
         job_data = {
@@ -257,13 +258,14 @@ def stitch_videos():
             'stage': 'queued',
             'progress': 0,
             'created_at': datetime.now().isoformat(),
+            'original_wwe_filename': wwe_video.filename,
             'original_fan_filename': fan_video.filename
         }
         
         processing_jobs[job_id] = job_data
         return jsonify({
             'success': True,
-            'message': 'Video uploaded successfully',
+            'message': 'Videos uploaded successfully',
             'job_id': job_id
         })
 
@@ -413,7 +415,7 @@ def delete_all_outputs():
                     deleted_count += 1
                 except Exception as e:
                     logging.error(f"Error deleting file {filename}: {str(e)}")
-
+        
         return jsonify({
             'success': True,
             'message': f'Deleted {deleted_count} output files'
@@ -537,6 +539,102 @@ def get_status():
     except Exception as e:
         logging.error(f"Error in get_status: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/check_wwe_video', methods=['GET'])
+def check_wwe_video():
+    """Check if the default WWE video exists and is valid"""
+    try:
+        if not os.path.exists(DEFAULT_WWE_VIDEO):
+            return jsonify({
+                'success': False,
+                'message': 'Default WWE video not found',
+                'exists': False
+            })
+        
+        # Check if file is valid video
+        if not allowed_file(DEFAULT_WWE_VIDEO):
+            return jsonify({
+                'success': False,
+                'message': 'Default WWE video is not a valid video file',
+                'exists': True,
+                'valid': False
+            })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Default WWE video is available',
+            'exists': True,
+            'valid': True,
+            'size': os.path.getsize(DEFAULT_WWE_VIDEO) / (1024 * 1024)  # Size in MB
+        })
+    except Exception as e:
+        logging.error(f"Error checking WWE video: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error checking WWE video: {str(e)}'
+        }), 500
+
+@app.route('/api/stitch_single', methods=['POST'])
+def stitch_single_video():
+    """Process a single fan video with the default WWE video"""
+    try:
+        if 'fan_video' not in request.files:
+            return jsonify({'success': False, 'message': 'Fan video is required'})
+
+        fan_video = request.files['fan_video']
+
+        if fan_video.filename == '':
+            return jsonify({'success': False, 'message': 'No selected file'})
+
+        if not allowed_file(fan_video.filename):
+            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
+
+        if not check_file_size(fan_video):
+            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
+
+        if not os.path.exists(DEFAULT_WWE_VIDEO):
+            return jsonify({'success': False, 'message': 'Default WWE video not found'})
+
+        # Generate a unique job ID
+        job_id = str(uuid.uuid4())
+        
+        # Create job directory
+        job_dir = os.path.join(UPLOAD_FOLDER, job_id)
+        os.makedirs(job_dir, exist_ok=True)
+
+        # Save uploaded fan video
+        fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
+        fan_video.save(fan_path)
+
+        # Add job to queue
+        job_data = {
+            'id': job_id,
+            'wwe_video': DEFAULT_WWE_VIDEO,
+            'fan_video': fan_path,
+            'status': 'queued',
+            'stage': 'queued',
+            'progress': 0,
+            'created_at': datetime.now().isoformat(),
+            'original_wwe_filename': 'wwe_video.mp4',
+            'original_fan_filename': fan_video.filename,
+            'is_single_upload': True
+        }
+        
+        processing_jobs[job_id] = job_data
+        
+        # Add to processing queue
+        output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
+        job_queue.put((job_id, DEFAULT_WWE_VIDEO, fan_path, output_path))
+
+        return jsonify({
+            'success': True,
+            'message': 'Video uploaded successfully',
+            'job_id': job_id
+        })
+
+    except Exception as e:
+        logging.error(f"Error in stitch_single_video: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)})
 
 # Schedule cleanup task
 def schedule_cleanup():
