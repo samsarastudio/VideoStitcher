@@ -27,8 +27,10 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-here')  # Required for session
 
 # Configuration
-UPLOAD_FOLDER = 'uploads'
-OUTPUT_FOLDER = 'outputs'
+# Use Render's temporary directory for file storage
+RENDER_TEMP_DIR = os.getenv('RENDER_TEMP_DIR', '/tmp')
+UPLOAD_FOLDER = os.path.join(RENDER_TEMP_DIR, 'uploads')
+OUTPUT_FOLDER = os.path.join(RENDER_TEMP_DIR, 'outputs')
 MAX_FILE_SIZE_MB = 100
 MAX_FILE_AGE_HOURS = 24
 MAX_CONCURRENT_PROCESSES = 2
@@ -38,6 +40,10 @@ MAX_RECENT_JOBS = 50
 # Create necessary directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Log directory paths for debugging
+logging.info(f"Upload folder: {UPLOAD_FOLDER}")
+logging.info(f"Output folder: {OUTPUT_FOLDER}")
 
 # Global state
 processing_jobs: Dict[str, dict] = {}

@@ -10,7 +10,13 @@ def setup_logging():
 
 def create_directories():
     """Create necessary directories for the application"""
-    directories = ['uploads', 'outputs']
+    # Use Render's temporary directory
+    render_temp_dir = os.getenv('RENDER_TEMP_DIR', '/tmp')
+    directories = [
+        os.path.join(render_temp_dir, 'uploads'),
+        os.path.join(render_temp_dir, 'outputs')
+    ]
+    
     for directory in directories:
         os.makedirs(directory, exist_ok=True)
         logging.info(f"Created directory: {directory}")
