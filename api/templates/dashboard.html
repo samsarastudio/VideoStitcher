@@ -355,7 +355,13 @@
             <div class="card-body">
                 <!-- Default WWE Video Status -->
                 <div class="alert alert-info mb-4" id="wweVideoStatus">
-                    <i class="fas fa-spinner fa-spin me-2"></i>Checking default WWE video...
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-spinner fa-spin me-2"></i>
+                        <div>
+                            <div>Checking default WWE video...</div>
+                            <small class="text-muted" id="wweVideoPath"></small>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Single Video Upload -->
@@ -373,7 +379,7 @@
                             </button>
                         </div>
                     </form>
-                </div>
+        </div>
 
                 <hr class="my-4">
 
@@ -452,24 +458,41 @@
                 const data = await response.json();
                 
                 const statusElement = document.getElementById('wweVideoStatus');
+                const pathElement = document.getElementById('wweVideoPath');
+                
                 if (data.success) {
                     statusElement.className = 'alert alert-success';
                     statusElement.innerHTML = `
-                        <i class="fas fa-check-circle me-2"></i>
-                        Default WWE video is available (${data.size.toFixed(1)} MB)
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <div>
+                                <div>Default WWE video is available (${data.size.toFixed(1)} MB)</div>
+                                <small class="text-muted">${data.path}</small>
+                            </div>
+                        </div>
                     `;
                 } else {
                     statusElement.className = 'alert alert-warning';
                     statusElement.innerHTML = `
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        ${data.message}
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <div>
+                                <div>${data.message}</div>
+                                <small class="text-muted">${data.path}</small>
+                            </div>
+                        </div>
                     `;
                 }
             } catch (error) {
                 console.error('Error checking WWE video:', error);
                 document.getElementById('wweVideoStatus').innerHTML = `
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    Error checking WWE video status
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        <div>
+                            <div>Error checking WWE video status</div>
+                            <small class="text-muted">${error.message}</small>
+                        </div>
+                    </div>
                 `;
             }
         }

@@ -34,7 +34,11 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key-here')  # R
 RENDER_TEMP_DIR = os.getenv('RENDER_TEMP_DIR', '/tmp')
 UPLOAD_FOLDER = os.path.join(RENDER_TEMP_DIR, 'uploads')
 OUTPUT_FOLDER = os.path.join(RENDER_TEMP_DIR, 'outputs')
-DEFAULT_WWE_VIDEO = os.path.join(UPLOAD_FOLDER, 'wwe_video.mp4')
+
+# Get the root directory (where the app is running)
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_WWE_VIDEO = os.path.join(ROOT_DIR, 'wwe_video.mp4')
+
 MAX_FILE_SIZE_MB = 100
 MAX_FILE_AGE_HOURS = 24
 MAX_CONCURRENT_PROCESSES = 2
@@ -46,9 +50,17 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Log directory paths for debugging
+logging.info(f"Root directory: {ROOT_DIR}")
 logging.info(f"Upload folder: {UPLOAD_FOLDER}")
 logging.info(f"Output folder: {OUTPUT_FOLDER}")
-logging.info(f"Default WWE video: {DEFAULT_WWE_VIDEO}")
+logging.info(f"Default WWE video path: {DEFAULT_WWE_VIDEO}")
+
+# Check if default WWE video exists
+if os.path.exists(DEFAULT_WWE_VIDEO):
+    size_mb = os.path.getsize(DEFAULT_WWE_VIDEO) / (1024 * 1024)
+    logging.info(f"Default WWE video found: {DEFAULT_WWE_VIDEO} ({size_mb:.2f} MB)")
+else:
+    logging.warning(f"Default WWE video not found at: {DEFAULT_WWE_VIDEO}")
 
 # Global state
 processing_jobs: Dict[str, dict] = {}
@@ -544,34 +556,45 @@ def get_status():
 def check_wwe_video():
     """Check if the default WWE video exists and is valid"""
     try:
+        logging.info(f"Checking WWE video at: {DEFAULT_WWE_VIDEO}")
+        
         if not os.path.exists(DEFAULT_WWE_VIDEO):
+            logging.error(f"WWE video not found at: {DEFAULT_WWE_VIDEO}")
             return jsonify({
                 'success': False,
                 'message': 'Default WWE video not found',
-                'exists': False
+                'exists': False,
+                'path': DEFAULT_WWE_VIDEO
             })
         
         # Check if file is valid video
         if not allowed_file(DEFAULT_WWE_VIDEO):
+            logging.error(f"WWE video is not a valid video file: {DEFAULT_WWE_VIDEO}")
             return jsonify({
                 'success': False,
                 'message': 'Default WWE video is not a valid video file',
                 'exists': True,
-                'valid': False
+                'valid': False,
+                'path': DEFAULT_WWE_VIDEO
             })
+        
+        size_mb = os.path.getsize(DEFAULT_WWE_VIDEO) / (1024 * 1024)
+        logging.info(f"WWE video check successful: {DEFAULT_WWE_VIDEO} ({size_mb:.2f} MB)")
         
         return jsonify({
             'success': True,
             'message': 'Default WWE video is available',
             'exists': True,
             'valid': True,
-            'size': os.path.getsize(DEFAULT_WWE_VIDEO) / (1024 * 1024)  # Size in MB
+            'size': size_mb,
+            'path': DEFAULT_WWE_VIDEO
         })
     except Exception as e:
         logging.error(f"Error checking WWE video: {str(e)}")
         return jsonify({
             'success': False,
-            'message': f'Error checking WWE video: {str(e)}'
+            'message': f'Error checking WWE video: {str(e)}',
+            'path': DEFAULT_WWE_VIDEO
         }), 500
 
 @app.route('/api/stitch_single', methods=['POST'])
