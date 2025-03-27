@@ -98,6 +98,31 @@
         .success-text {
             color: #4CAF50;
         }
+        .action-buttons {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        .btn-start {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn-stop {
+            background-color: #ff4444;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .btn-start:disabled, .btn-stop:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -106,8 +131,9 @@
         
         <!-- Server Status Card -->
         <div class="card status-card mb-4">
-            <div class="card-header bg-primary text-white">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">Server Status</h5>
+                <button id="stopAllBtn" class="btn btn-danger btn-sm">Stop All Processes</button>
             </div>
             <div class="card-body">
                 <div class="row">
@@ -241,9 +267,75 @@
                 `;
             }
 
+            // Add action buttons
+            content += `
+                <div class="action-buttons">
+                    <button class="btn-start" onclick="startJob('${job.id}')" 
+                            ${job.status !== 'queued' ? 'disabled' : ''}>
+                        Start Process
+                    </button>
+                    <button class="btn-stop" onclick="stopJob('${job.id}')"
+                            ${!['processing', 'queued'].includes(job.status) ? 'disabled' : ''}>
+                        Stop Process
+                    </button>
+                </div>
+            `;
+
             jobElement.innerHTML = content;
             container.appendChild(jobElement);
         }
+
+        // Add job control functions
+        async function startJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/start`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    alert(`Failed to start job: ${data.message}`);
+                }
+                updateDashboard();
+            } catch (error) {
+                console.error('Error starting job:', error);
+                alert('Failed to start job. Check console for details.');
+            }
+        }
+
+        async function stopJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/stop`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    alert(`Failed to stop job: ${data.message}`);
+                }
+                updateDashboard();
+            } catch (error) {
+                console.error('Error stopping job:', error);
+                alert('Failed to stop job. Check console for details.');
+            }
+        }
+
+        async function stopAllProcesses() {
+            try {
+                const response = await fetch('/api/jobs/stop-all', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    alert(`Failed to stop all processes: ${data.message}`);
+                }
+                updateDashboard();
+            } catch (error) {
+                console.error('Error stopping all processes:', error);
+                alert('Failed to stop all processes. Check console for details.');
+            }
+        }
+
+        // Add event listener for stop all button
+        document.getElementById('stopAllBtn').addEventListener('click', stopAllProcesses);
 
         function updateDashboard() {
             fetch('/api/jobs')

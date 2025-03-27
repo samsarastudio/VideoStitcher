@@ -374,6 +374,138 @@ def get_status():
             'message': f'Error getting status: {str(e)}'
         }), 500
 
+@app.route('/api/job/<job_id>/start', methods=['POST'])
+def start_job(job_id):
+    """Start a specific job"""
+    try:
+        if job_id not in processing_jobs:
+            return jsonify({
+                'success': False,
+                'message': 'Job not found'
+            }), 404
+
+        job = processing_jobs[job_id]
+        if job['status'] != 'queued':
+            return jsonify({
+                'success': False,
+                'message': 'Job is not in queued state'
+            }), 400
+
+        # Start processing the job
+        wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
+        fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
+        output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+
+        if not (os.path.exists(wwe_path) and os.path.exists(fan_path)):
+            return jsonify({
+                'success': False,
+                'message': 'Video files not found'
+            }), 400
+
+        # Add job to processing queue
+        job_queue.put((job_id, wwe_path, fan_path, output_path))
+
+        return jsonify({
+            'success': True,
+            'message': 'Job started successfully'
+        })
+
+    except Exception as e:
+        logging.error(f"Error starting job {job_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error starting job: {str(e)}'
+        }), 500
+
+@app.route('/api/job/<job_id>/stop', methods=['POST'])
+def stop_job(job_id):
+    """Stop a specific job"""
+    try:
+        if job_id not in processing_jobs:
+            return jsonify({
+                'success': False,
+                'message': 'Job not found'
+            }), 404
+
+        job = processing_jobs[job_id]
+        if job['status'] not in ['queued', 'processing']:
+            return jsonify({
+                'success': False,
+                'message': 'Job is not active'
+            }), 400
+
+        # Mark job as failed
+        job.update({
+            'status': 'failed',
+            'end_time': datetime.now().isoformat(),
+            'error': 'Job stopped by user',
+            'message': 'Processing stopped by user request'
+        })
+
+        # Clean up any temporary files
+        try:
+            wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
+            fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
+            output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+            
+            for path in [wwe_path, fan_path, output_path]:
+                if os.path.exists(path):
+                    os.remove(path)
+        except Exception as e:
+            logging.error(f"Error cleaning up files for job {job_id}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Job stopped successfully'
+        })
+
+    except Exception as e:
+        logging.error(f"Error stopping job {job_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping job: {str(e)}'
+        }), 500
+
+@app.route('/api/jobs/stop-all', methods=['POST'])
+def stop_all_jobs():
+    """Stop all active jobs"""
+    try:
+        stopped_count = 0
+        with processing_lock:
+            for job_id, job in processing_jobs.items():
+                if job['status'] in ['queued', 'processing']:
+                    job.update({
+                        'status': 'failed',
+                        'end_time': datetime.now().isoformat(),
+                        'error': 'Job stopped by user',
+                        'message': 'Processing stopped by user request'
+                    })
+                    stopped_count += 1
+
+                    # Clean up any temporary files
+                    try:
+                        wwe_path = os.path.join(UPLOAD_FOLDER, f"wwe_{job_id}.mp4")
+                        fan_path = os.path.join(UPLOAD_FOLDER, f"fan_{job_id}.mp4")
+                        output_path = os.path.join(OUTPUT_FOLDER, f"output_{job_id}.mp4")
+                        
+                        for path in [wwe_path, fan_path, output_path]:
+                            if os.path.exists(path):
+                                os.remove(path)
+                    except Exception as e:
+                        logging.error(f"Error cleaning up files for job {job_id}: {str(e)}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Stopped {stopped_count} jobs successfully'
+        })
+
+    except Exception as e:
+        logging.error(f"Error stopping all jobs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error stopping jobs: {str(e)}'
+        }), 500
+
 # Schedule cleanup task
 def schedule_cleanup():
     while True:
