@@ -12,6 +12,7 @@ from typing import Dict, Optional, List
 import traceback
 from threading import Thread
 import pickle
+import cv2
 
 # Configure logging
 logging.basicConfig(
@@ -129,6 +130,12 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
             if size_mb < 0.01:  # Less than 10KB
                 raise Exception(f"Video file too small: {video_path} ({size_mb:.2f} MB)")
+            
+            # Check if file is a valid video
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise Exception(f"Invalid video file: {video_path}")
+            cap.release()
         
         # Process videos
         stitcher = VideoStitcher(wwe_path, fan_path)
@@ -143,6 +150,12 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
             if output_size_mb < 10:  # Less than 10MB
                 raise Exception(f"Output video too small: {output_size_mb:.2f} MB")
+            
+            # Validate output video is playable
+            cap = cv2.VideoCapture(output_path)
+            if not cap.isOpened():
+                raise Exception("Output video is not a valid video file")
+            cap.release()
             
             processing_jobs[job_id].update({
                 'status': 'completed',
@@ -177,6 +190,13 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             'progress': 0
         })
         logging.error(f"Error processing job {job_id}: {str(e)}")
+        
+        # Clean up any partial output file
+        try:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+        except Exception as cleanup_error:
+            logging.error(f"Error cleaning up failed output: {str(cleanup_error)}")
     finally:
         with processing_lock:
             active_processes -= 1
@@ -531,36 +551,62 @@ def preview_video(job_id):
             'message': f'Error previewing video: {str(e)}'
         }), 500
 
-@app.route('/api/download/<job_id>')
+@app.route('/api/download/<job_id>', methods=['GET'])
 def download_video(job_id):
-    """Download a processed video file"""
+    """Download a processed video"""
     try:
-        job = processing_jobs.get(job_id)
-        if not job:
+        # Check if job exists and is completed
+        if job_id not in processing_jobs:
             return jsonify({
                 'success': False,
                 'message': 'Job not found'
             }), 404
 
+        job = processing_jobs[job_id]
         if job['status'] != 'completed':
             return jsonify({
                 'success': False,
                 'message': 'Video not ready for download'
             }), 400
 
-        output_path = job.get('output_path')
-        if not output_path or not os.path.exists(output_path):
+        output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
+        
+        # Validate output file exists and is valid
+        if not os.path.exists(output_path):
             return jsonify({
                 'success': False,
-                'message': 'Video file not found'
+                'message': 'Output file not found'
             }), 404
+            
+        # Check file size
+        file_size = os.path.getsize(output_path)
+        if file_size < 10 * 1024 * 1024:  # Less than 10MB
+            return jsonify({
+                'success': False,
+                'message': 'Output file is invalid or corrupted'
+            }), 400
+            
+        # Validate video is playable
+        cap = cv2.VideoCapture(output_path)
+        if not cap.isOpened():
+            return jsonify({
+                'success': False,
+                'message': 'Output file is not a valid video'
+            }), 400
+        cap.release()
+
+        # Get original filename
+        original_filename = f"stitched_video_{job_id}.mp4"
+        if 'original_fan_filename' in job:
+            original_filename = f"stitched_{job['original_fan_filename']}"
 
         return send_file(
             output_path,
-            mimetype='video/mp4',
             as_attachment=True,
-            download_name=f'stitched_video_{job_id}.mp4'
+            download_name=original_filename,
+            mimetype='video/mp4'
         )
+
     except Exception as e:
         logging.error(f"Error downloading video: {str(e)}")
         return jsonify({

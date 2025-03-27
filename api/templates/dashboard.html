@@ -694,7 +694,7 @@
                         ${job.message ? `
                             <div class="alert alert-info mb-3">
                                 ${job.message}
-                            </div>
+                                </div>
                         ` : ''}
 
                         ${job.error ? `
@@ -788,7 +788,7 @@
                 });
                 const data = await response.json();
                 
-                if (data.success) {
+                    if (data.success) {
                     showAlert('success', 'Job started successfully');
                     refreshJobs();
                 } else {
@@ -807,7 +807,7 @@
                 });
                 const data = await response.json();
                 
-                if (data.success) {
+                    if (data.success) {
                     showAlert('success', 'Job stopped successfully');
                     refreshJobs();
                 } else {
