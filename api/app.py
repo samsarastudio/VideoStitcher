@@ -24,9 +24,9 @@ logging.basicConfig(
 
 app = Flask(__name__)
 
-# Configure upload folder
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
-OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'outputs')
+# Configure upload folder using Render's environment
+UPLOAD_FOLDER = os.path.join(os.getenv('RENDER_TEMP_DIR', '/tmp'), 'uploads')
+OUTPUT_FOLDER = os.path.join(os.getenv('RENDER_TEMP_DIR', '/tmp'), 'outputs')
 
 # Ensure upload and output folders exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -234,16 +234,22 @@ def stitch_videos():
         if wwe_video.filename == '' or fan_video.filename == '':
             return jsonify({'success': False, 'message': 'No selected files'})
 
+        if not allowed_file(wwe_video.filename) or not allowed_file(fan_video.filename):
+            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
+
+        if not check_file_size(wwe_video) or not check_file_size(fan_video):
+            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
+
         # Generate a unique job ID
         job_id = str(uuid.uuid4())
         
         # Create job directory
-        job_dir = os.path.join(app.config['UPLOAD_FOLDER'], job_id)
+        job_dir = os.path.join(UPLOAD_FOLDER, job_id)
         os.makedirs(job_dir, exist_ok=True)
 
         # Save uploaded files with original names
-        wwe_path = os.path.join(job_dir, wwe_video.filename)
-        fan_path = os.path.join(job_dir, fan_video.filename)
+        wwe_path = os.path.join(job_dir, secure_filename(wwe_video.filename))
+        fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
         
         wwe_video.save(wwe_path)
         fan_video.save(fan_path)
@@ -261,16 +267,7 @@ def stitch_videos():
             'original_fan_filename': fan_video.filename
         }
         
-        # Check if there's already a job with the same video files
-        for existing_job in active_jobs:
-            if (existing_job['original_wwe_filename'] == wwe_video.filename and 
-                existing_job['original_fan_filename'] == fan_video.filename):
-                # Remove the old job and its files
-                cleanup_job_files(existing_job['id'])
-                active_jobs.remove(existing_job)
-                break
-
-        active_jobs.append(job_data)
+        processing_jobs[job_id] = job_data
         return jsonify({
             'success': True,
             'message': 'Videos uploaded successfully',
@@ -278,82 +275,59 @@ def stitch_videos():
         })
 
     except Exception as e:
+        logging.error(f"Error in stitch_videos: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/job/<job_id>', methods=['GET'])
 def get_job_status(job_id):
-    """Get the status of a specific job"""
     try:
         if job_id not in processing_jobs:
-            return jsonify({
-                'success': False,
-                'message': 'Job not found'
-            }), 404
+            return jsonify({'success': False, 'message': 'Job not found'}), 404
 
-        job_info = processing_jobs[job_id]
+        job = processing_jobs[job_id]
         return jsonify({
             'success': True,
-            'job_id': job_id,
-            'status': job_info['status'],
-            'created_at': job_info['created_at'],
-            'output_file': job_info.get('output_file'),
-            'message': job_info.get('message'),
-            'error': job_info.get('error')
+            'status': job['status'],
+            'progress': job['progress'],
+            'stage': job['stage'],
+            'message': job.get('message', ''),
+            'error': job.get('error', '')
         })
 
     except Exception as e:
-        logging.error(f"Error getting job status: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error getting job status: {str(e)}'
-        }), 500
+        logging.error(f"Error in get_job_status: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/download/<job_id>', methods=['GET'])
 def download_video(job_id):
-    """Download the processed video for a specific job"""
     try:
         if job_id not in processing_jobs:
-            return jsonify({
-                'success': False,
-                'message': 'Job not found'
-            }), 404
+            return jsonify({'success': False, 'message': 'Job not found'}), 404
 
         job = processing_jobs[job_id]
         if job['status'] != 'completed':
-            return jsonify({
-                'success': False,
-                'message': 'Video is not ready for download'
-            }), 400
+            return jsonify({'success': False, 'message': 'Video is not ready for download'}), 400
 
         output_filename = job.get('output_file')
         if not output_filename:
-            return jsonify({
-                'success': False,
-                'message': 'Output file not found'
-            }), 404
+            return jsonify({'success': False, 'message': 'Output file not found'}), 404
 
         file_path = os.path.join(OUTPUT_FOLDER, output_filename)
         if not os.path.exists(file_path):
-            return jsonify({
-                'success': False,
-                'message': 'Output file does not exist'
-            }), 404
+            return jsonify({'success': False, 'message': 'Output file does not exist'}), 404
             
         return send_file(
             file_path,
             as_attachment=True,
             download_name=f"stitched_video_{job_id}.mp4"
         )
+
     except Exception as e:
-        logging.error(f"Error downloading video for job {job_id}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error downloading video: {str(e)}'
-        }), 500
+        logging.error(f"Error in download_video: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    """Get current server status and processing queue"""
     try:
         with processing_lock:
             return jsonify({
@@ -365,21 +339,16 @@ def get_status():
                 'server_status': 'busy' if active_processes >= MAX_CONCURRENT_PROCESSES else 'available'
             })
     except Exception as e:
-        logging.error(f"Error getting server status: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error getting status: {str(e)}'
-        }), 500
+        logging.error(f"Error in get_status: {str(e)}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/job/<job_id>/start', methods=['POST'])
 def start_job(job_id):
     try:
-        # Find the job
-        job = next((j for j in active_jobs if j['id'] == job_id), None)
-        if not job:
+        if job_id not in processing_jobs:
             return jsonify({'success': False, 'message': 'Job not found'})
 
-        # Check if files exist
+        job = processing_jobs[job_id]
         if not os.path.exists(job['wwe_video']) or not os.path.exists(job['fan_video']):
             return jsonify({'success': False, 'message': 'Video files not found. They may have been cleaned up or deleted.'})
 
@@ -391,18 +360,22 @@ def start_job(job_id):
         # Start processing in background
         def process_video():
             try:
+                output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
                 stitcher = VideoStitcher(job['wwe_video'], job['fan_video'])
                 
                 def progress_callback(progress, stage):
                     job['progress'] = progress
                     job['stage'] = stage
                 
-                stitcher.stitch_videos(progress_callback)
+                success, message = stitcher.stitch_videos(output_path, progress_callback)
                 
-                # Update job status
-                job['status'] = 'completed'
-                job['progress'] = 100
-                job['stage'] = 'completed'
+                if success:
+                    job['status'] = 'completed'
+                    job['progress'] = 100
+                    job['stage'] = 'completed'
+                    job['output_file'] = f"{job_id}.mp4"
+                else:
+                    raise Exception(message)
                 
             except Exception as e:
                 job['status'] = 'failed'
@@ -417,6 +390,7 @@ def start_job(job_id):
         return jsonify({'success': True, 'message': 'Job started successfully'})
 
     except Exception as e:
+        logging.error(f"Error in start_job: {str(e)}")
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/job/<job_id>/stop', methods=['POST'])
@@ -496,7 +470,7 @@ def schedule_cleanup():
 
 if __name__ == '__main__':
     # Start cleanup thread
-    cleanup_thread = threading.Thread(target=schedule_cleanup, daemon=True)
+    cleanup_thread = Thread(target=schedule_cleanup, daemon=True)
     cleanup_thread.start()
     
     # Start queue processing threads
