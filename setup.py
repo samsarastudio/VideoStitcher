@@ -34,12 +34,12 @@ setup(
     name="video_stitcher",
     version="1.0.0",
     packages=find_packages(),
-    python_requires='>=3.8,<3.9',
+    python_requires='>=3.8,<3.12',
     install_requires=[
         'flask==2.0.1',
         'gunicorn==20.1.0',
-        'opencv-python==4.5.3.56',
-        'numpy==1.21.2',
+        'opencv-python-headless==4.8.0.74',
+        'numpy>=1.24.0',
         'werkzeug==2.0.1',
         'python-dotenv==0.19.0',
         'moviepy==1.0.3'
