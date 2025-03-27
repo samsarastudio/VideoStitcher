@@ -290,8 +290,8 @@ def stitch_videos():
             'id': job_id,
             'wwe_video': wwe_path,
             'fan_video': fan_path,
-            'status': 'queued',
-            'stage': 'queued',
+            'status': 'processing',
+            'stage': 'initializing',
             'progress': 0,
             'created_at': datetime.now().isoformat(),
             'original_wwe_filename': wwe_video.filename,
@@ -299,9 +299,17 @@ def stitch_videos():
         }
         
         processing_jobs[job_id] = job_data
+        
+        # Add to processing queue and start immediately
+        output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
+        job_queue.put((job_id, wwe_path, fan_path, output_path))
+
+        # Start the job immediately
+        Thread(target=process_video_job, args=(job_id, wwe_path, fan_path, output_path)).start()
+
         return jsonify({
             'success': True,
-            'message': 'Videos uploaded successfully',
+            'message': 'Videos uploaded successfully and processing started',
             'job_id': job_id
         })
 
@@ -451,7 +459,7 @@ def delete_all_outputs():
                     deleted_count += 1
                 except Exception as e:
                     logging.error(f"Error deleting file {filename}: {str(e)}")
-        
+
         return jsonify({
             'success': True,
             'message': f'Deleted {deleted_count} output files'
@@ -658,8 +666,8 @@ def stitch_single_video():
             'id': job_id,
             'wwe_video': DEFAULT_WWE_VIDEO,
             'fan_video': fan_path,
-            'status': 'queued',
-            'stage': 'queued',
+            'status': 'processing',
+            'stage': 'initializing',
             'progress': 0,
             'created_at': datetime.now().isoformat(),
             'original_wwe_filename': 'wwe_video.mp4',
@@ -669,13 +677,16 @@ def stitch_single_video():
         
         processing_jobs[job_id] = job_data
         
-        # Add to processing queue
+        # Add to processing queue and start immediately
         output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
         job_queue.put((job_id, DEFAULT_WWE_VIDEO, fan_path, output_path))
 
+        # Start the job immediately
+        Thread(target=process_video_job, args=(job_id, DEFAULT_WWE_VIDEO, fan_path, output_path)).start()
+
         return jsonify({
             'success': True,
-            'message': 'Video uploaded successfully',
+            'message': 'Video uploaded successfully and processing started',
             'job_id': job_id
         })
 

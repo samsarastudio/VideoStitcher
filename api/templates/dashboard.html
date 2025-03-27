@@ -344,9 +344,23 @@
     </style>
 </head>
 <body class="bg-light">
-    <div class="container py-4">
-        <h1 class="text-center mb-4">Video Stitcher Dashboard</h1>
-        
+    <div class="container-fluid py-4">
+        <!-- Header with Controls -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Video Stitcher Dashboard</h2>
+            <div class="btn-group">
+                <button class="btn btn-success" onclick="startAllJobs()">
+                    <i class="fas fa-play"></i> Start All
+                </button>
+                <button class="btn btn-danger" onclick="stopAllJobs()">
+                    <i class="fas fa-stop"></i> Stop All
+                </button>
+                <button class="btn btn-primary" onclick="refreshJobs()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </div>
+
         <!-- Upload Section -->
         <div class="card mb-4">
             <div class="card-header">
@@ -512,8 +526,8 @@
                             <div>Error checking WWE video status</div>
                             <small class="text-muted">${error.message}</small>
                         </div>
-                    </div>
-                `;
+                </div>
+            `;
             }
         }
 
@@ -648,6 +662,12 @@
                         </button>
                     </div>
                 `;
+            } else if (job.status === 'stopped' || job.status === 'failed') {
+                actionButtons = `
+                    <button class="btn btn-sm btn-success" onclick="startJob('${job.id}')">
+                        <i class="fas fa-play"></i> Start
+                    </button>
+                `;
             }
             
             let sizeInfo = '';
@@ -723,6 +743,63 @@
         }
 
         // Job control functions
+        async function startAllJobs() {
+            try {
+                const response = await fetch('/api/jobs/start_all', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', data.message);
+                    refreshJobs();
+                } else {
+                    showAlert('danger', data.message || 'Failed to start jobs');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error starting jobs');
+                console.error('Start all jobs error:', error);
+            }
+        }
+
+        async function stopAllJobs() {
+            try {
+                const response = await fetch('/api/jobs/stop_all', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', data.message);
+                    refreshJobs();
+                } else {
+                    showAlert('danger', data.message || 'Failed to stop jobs');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error stopping jobs');
+                console.error('Stop all jobs error:', error);
+            }
+        }
+
+        async function startJob(jobId) {
+            try {
+                const response = await fetch(`/api/job/${jobId}/start`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('success', 'Job started successfully');
+                    refreshJobs();
+                } else {
+                    showAlert('danger', data.message || 'Failed to start job');
+                }
+            } catch (error) {
+                showAlert('danger', 'Error starting job');
+                console.error('Start job error:', error);
+            }
+        }
+
         async function stopJob(jobId) {
             try {
                 const response = await fetch(`/api/job/${jobId}/stop`, {
@@ -772,7 +849,7 @@
                 const response = await fetch('/api/outputs');
                 const data = await response.json();
                 
-                if (data.success) {
+                    if (data.success) {
                     updateOutputFiles(data.files);
                 }
             } catch (error) {
