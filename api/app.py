@@ -10,6 +10,7 @@ from queue import Queue
 import logging
 from typing import Dict, Optional, List
 import traceback
+from threading import Thread
 
 # Configure logging
 logging.basicConfig(
@@ -224,86 +225,60 @@ def get_jobs():
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():
     try:
-        # Check if files are present in the request
         if 'wwe_video' not in request.files or 'fan_video' not in request.files:
-            return jsonify({
-                'success': False,
-                'message': 'Both WWE video and fan video are required'
-            }), 400
+            return jsonify({'success': False, 'message': 'Both WWE and fan videos are required'})
 
         wwe_video = request.files['wwe_video']
         fan_video = request.files['fan_video']
 
-        # Check if files are valid
-        if not (wwe_video and fan_video):
-            return jsonify({
-                'success': False,
-                'message': 'No selected files'
-            }), 400
+        if wwe_video.filename == '' or fan_video.filename == '':
+            return jsonify({'success': False, 'message': 'No selected files'})
 
-        if not (allowed_file(wwe_video.filename) and allowed_file(fan_video.filename)):
-            return jsonify({
-                'success': False,
-                'message': 'Invalid file type. Allowed types: mp4, avi, mov'
-            }), 400
-
-        # Check file sizes
-        if not (check_file_size(wwe_video) and check_file_size(fan_video)):
-            return jsonify({
-                'success': False,
-                'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'
-            }), 400
-
-        # Generate unique filenames and job ID
+        # Generate a unique job ID
         job_id = str(uuid.uuid4())
-        wwe_filename = secure_filename(f"wwe_{job_id}_{wwe_video.filename}")
-        fan_filename = secure_filename(f"fan_{job_id}_{fan_video.filename}")
-        output_filename = f"output_{job_id}.mp4"
+        
+        # Create job directory
+        job_dir = os.path.join(app.config['UPLOAD_FOLDER'], job_id)
+        os.makedirs(job_dir, exist_ok=True)
 
-        # Save uploaded files
-        wwe_path = os.path.join(UPLOAD_FOLDER, wwe_filename)
-        fan_path = os.path.join(UPLOAD_FOLDER, fan_filename)
-        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-
+        # Save uploaded files with original names
+        wwe_path = os.path.join(job_dir, wwe_video.filename)
+        fan_path = os.path.join(job_dir, fan_video.filename)
+        
         wwe_video.save(wwe_path)
         fan_video.save(fan_path)
 
-        # Check queue status
-        if job_queue.full():
-            return jsonify({
-                'success': False,
-                'message': 'Processing queue is full. Please try again later.'
-            }), 503
-
-        # Initialize job status with more details
-        processing_jobs[job_id] = {
-            'id': job_id,
-            'status': 'queued',
-            'created_at': datetime.now().isoformat(),
-            'output_file': output_filename,
-            'wwe_filename': wwe_filename,
-            'fan_filename': fan_filename,
-            'progress': 0,
-            'stage': 'queued',
-            'message': 'Job queued for processing'
-        }
-
         # Add job to queue
-        job_queue.put((job_id, wwe_path, fan_path, output_path))
+        job_data = {
+            'id': job_id,
+            'wwe_video': wwe_path,
+            'fan_video': fan_path,
+            'status': 'queued',
+            'stage': 'queued',
+            'progress': 0,
+            'created_at': datetime.now().isoformat(),
+            'original_wwe_filename': wwe_video.filename,
+            'original_fan_filename': fan_video.filename
+        }
+        
+        # Check if there's already a job with the same video files
+        for existing_job in active_jobs:
+            if (existing_job['original_wwe_filename'] == wwe_video.filename and 
+                existing_job['original_fan_filename'] == fan_video.filename):
+                # Remove the old job and its files
+                cleanup_job_files(existing_job['id'])
+                active_jobs.remove(existing_job)
+                break
 
+        active_jobs.append(job_data)
         return jsonify({
             'success': True,
-            'message': 'Video processing job queued successfully',
-            'job_id': job_id,
-            'output_file': output_filename
+            'message': 'Videos uploaded successfully',
+            'job_id': job_id
         })
 
     except Exception as e:
-        logging.error(f"Error in stitch_videos endpoint: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error processing request: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/job/<job_id>', methods=['GET'])
 def get_job_status(job_id):
@@ -398,102 +373,80 @@ def get_status():
 
 @app.route('/api/job/<job_id>/start', methods=['POST'])
 def start_job(job_id):
-    """Start a specific job"""
     try:
-        if job_id not in processing_jobs:
-            return jsonify({
-                'success': False,
-                'message': 'Job not found'
-            }), 404
+        # Find the job
+        job = next((j for j in active_jobs if j['id'] == job_id), None)
+        if not job:
+            return jsonify({'success': False, 'message': 'Job not found'})
 
-        job = processing_jobs[job_id]
-        if job['status'] != 'queued':
-            return jsonify({
-                'success': False,
-                'message': 'Job is not in queued state'
-            }), 400
+        # Check if files exist
+        if not os.path.exists(job['wwe_video']) or not os.path.exists(job['fan_video']):
+            return jsonify({'success': False, 'message': 'Video files not found. They may have been cleaned up or deleted.'})
 
-        # Get the original filenames from the job data
-        wwe_path = os.path.join(UPLOAD_FOLDER, job.get('wwe_filename'))
-        fan_path = os.path.join(UPLOAD_FOLDER, job.get('fan_filename'))
-        output_path = os.path.join(OUTPUT_FOLDER, job.get('output_file'))
+        # Update job status
+        job['status'] = 'processing'
+        job['stage'] = 'initializing'
+        job['progress'] = 0
 
-        if not (os.path.exists(wwe_path) and os.path.exists(fan_path)):
-            return jsonify({
-                'success': False,
-                'message': 'Video files not found. The files may have been cleaned up or deleted.'
-            }), 400
+        # Start processing in background
+        def process_video():
+            try:
+                stitcher = VideoStitcher(job['wwe_video'], job['fan_video'])
+                
+                def progress_callback(progress, stage):
+                    job['progress'] = progress
+                    job['stage'] = stage
+                
+                stitcher.stitch_videos(progress_callback)
+                
+                # Update job status
+                job['status'] = 'completed'
+                job['progress'] = 100
+                job['stage'] = 'completed'
+                
+            except Exception as e:
+                job['status'] = 'failed'
+                job['error'] = str(e)
+                job['stage'] = 'failed'
+                job['progress'] = 0
 
-        # Add job to processing queue
-        job_queue.put((job_id, wwe_path, fan_path, output_path))
+        thread = Thread(target=process_video)
+        thread.daemon = True
+        thread.start()
 
-        return jsonify({
-            'success': True,
-            'message': 'Job started successfully'
-        })
+        return jsonify({'success': True, 'message': 'Job started successfully'})
 
     except Exception as e:
-        logging.error(f"Error starting job {job_id}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error starting job: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/job/<job_id>/stop', methods=['POST'])
 def stop_job(job_id):
-    """Stop a specific job"""
     try:
-        if job_id not in processing_jobs:
-            return jsonify({
-                'success': False,
-                'message': 'Job not found'
-            }), 404
+        # Find the job
+        job = next((j for j in active_jobs if j['id'] == job_id), None)
+        if not job:
+            return jsonify({'success': False, 'message': 'Job not found'})
 
-        job = processing_jobs[job_id]
-        if job['status'] not in ['queued', 'processing']:
-            return jsonify({
-                'success': False,
-                'message': 'Job is not active'
-            }), 400
+        # Update job status
+        job['status'] = 'stopped'
+        job['stage'] = 'stopped'
+        
+        # Clean up job files
+        cleanup_job_files(job_id)
+        
+        # Remove from active jobs
+        active_jobs.remove(job)
+        
+        # Add to recent jobs if it was processing
+        if job['status'] in ['processing', 'queued']:
+            recent_jobs.append(job)
+            if len(recent_jobs) > 10:  # Keep only last 10 jobs
+                recent_jobs.pop(0)
 
-        # Mark job as failed
-        job.update({
-            'status': 'failed',
-            'end_time': datetime.now().isoformat(),
-            'error': 'Job stopped by user',
-            'message': 'Processing stopped by user request'
-        })
-
-        # Clean up any temporary files
-        try:
-            wwe_path = os.path.join(UPLOAD_FOLDER, job.get('wwe_filename'))
-            fan_path = os.path.join(UPLOAD_FOLDER, job.get('fan_filename'))
-            output_path = os.path.join(OUTPUT_FOLDER, job.get('output_file'))
-            
-            for path in [wwe_path, fan_path, output_path]:
-                if os.path.exists(path):
-                    os.remove(path)
-        except Exception as e:
-            logging.error(f"Error cleaning up files for job {job_id}: {str(e)}")
-
-        # Add to recent jobs if it was in processing state
-        if job['status'] == 'processing':
-            with processing_lock:
-                recent_jobs.insert(0, job.copy())
-                if len(recent_jobs) > MAX_RECENT_JOBS:
-                    recent_jobs.pop()
-
-        return jsonify({
-            'success': True,
-            'message': 'Job stopped successfully'
-        })
+        return jsonify({'success': True, 'message': 'Job stopped successfully'})
 
     except Exception as e:
-        logging.error(f"Error stopping job {job_id}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error stopping job: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/jobs/stop-all', methods=['POST'])
 def stop_all_jobs():
