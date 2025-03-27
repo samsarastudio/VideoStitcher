@@ -162,6 +162,7 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
                 raise Exception("Generated video is not valid")
             cap.release()
             
+            # Update job status with output file info
             processing_jobs[job_id].update({
                 'status': 'completed',
                 'end_time': datetime.now().isoformat(),
@@ -169,7 +170,8 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
                 'progress': 1.0,
                 'stage': 'completed',
                 'output_path': output_path,
-                'output_size': output_size_mb
+                'output_size': output_size_mb,
+                'output_filename': os.path.basename(output_path)
             })
             
             # Add to recent jobs
