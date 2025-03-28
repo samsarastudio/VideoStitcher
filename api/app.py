@@ -39,7 +39,7 @@ OUTPUT_FOLDER = os.path.join(RENDER_TEMP_DIR, 'outputs')
 
 # Get the root directory (where the app is running)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_WWE_VIDEO = os.path.join(ROOT_DIR, 'wwe_video.mp4')
+DEFAULT_WWE_VIDEO = os.getenv('DEFAULT_WWE_VIDEO', os.path.join(ROOT_DIR, 'wwe_video.mp4'))
 
 MAX_FILE_SIZE_MB = 100
 MAX_FILE_AGE_HOURS = 24
@@ -57,12 +57,20 @@ logging.info(f"Upload folder: {UPLOAD_FOLDER}")
 logging.info(f"Output folder: {OUTPUT_FOLDER}")
 logging.info(f"Default WWE video path: {DEFAULT_WWE_VIDEO}")
 
-# Check if default WWE video exists
+# Check if default WWE video exists and is valid
 if os.path.exists(DEFAULT_WWE_VIDEO):
     size_mb = os.path.getsize(DEFAULT_WWE_VIDEO) / (1024 * 1024)
     logging.info(f"Default WWE video found: {DEFAULT_WWE_VIDEO} ({size_mb:.2f} MB)")
+    
+    # Validate the video file
+    cap = cv2.VideoCapture(DEFAULT_WWE_VIDEO)
+    if not cap.isOpened():
+        logging.error(f"Default WWE video is not a valid video file: {DEFAULT_WWE_VIDEO}")
+    else:
+        logging.info(f"Default WWE video is valid (FPS: {cap.get(cv2.CAP_PROP_FPS)})")
+    cap.release()
 else:
-    logging.warning(f"Default WWE video not found at: {DEFAULT_WWE_VIDEO}")
+    logging.error(f"Default WWE video not found at: {DEFAULT_WWE_VIDEO}")
 
 # Global state
 processing_jobs: Dict[str, dict] = {}
@@ -700,6 +708,31 @@ def validate_uploaded_video(file):
             os.remove(temp_path)
         except:
             pass
+        
+        if result.stderr:
+            return False, f"Invalid video file: {result.stderr}"
+        
+        return True, "Video file is valid"
+    except Exception as e:
+        return False, f"Error validating video: {str(e)}"
+
+def validate_video_file(file_path):
+    """Validate a video file using FFMPEG"""
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return False, "File does not exist"
+        
+        # Check file size
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if size_mb < 0.01:  # Less than 10KB
+            return False, f"File too small: {size_mb:.2f} MB"
+        
+        # Use FFMPEG to check video file
+        result = subprocess.run([
+            'ffmpeg', '-v', 'error', '-i', file_path,
+            '-f', 'null', '-'
+        ], capture_output=True, text=True)
         
         if result.stderr:
             return False, f"Invalid video file: {result.stderr}"

@@ -2,7 +2,13 @@ services:
   - type: web
     name: video-stitcher
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      # Install latest FFMPEG
+      apt-get update && apt-get install -y software-properties-common
+      add-apt-repository ppa:jonathonf/ffmpeg-4
+      apt-get update && apt-get install -y ffmpeg
+      # Install Python dependencies
+      pip install -r requirements.txt
     startCommand: gunicorn api.wsgi:app
     envVars:
       - key: PYTHON_VERSION
@@ -19,6 +25,8 @@ services:
         value: 50
       - key: MAX_FILE_AGE_HOURS
         value: 24
+      - key: DEFAULT_WWE_VIDEO
+        value: /opt/render/project/src/wwe_video.mp4
     healthCheckPath: /api/status
     disk:
       name: video-storage
