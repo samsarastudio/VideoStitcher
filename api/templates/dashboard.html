@@ -384,7 +384,7 @@
                 <!-- Single Video Upload -->
                 <div class="mb-4">
                     <h6 class="mb-3">Quick Upload (Using Default WWE Video)</h6>
-                    <form id="singleUploadForm" class="row g-3">
+                    <form id="singleVideoForm" class="row g-3">
                         <div class="col-md-8">
                             <label class="form-label">Fan Video</label>
                             <input type="file" class="form-control" name="fan_video" accept="video/*" required>
@@ -406,7 +406,7 @@
                 <!-- Two Video Upload -->
                 <div>
                     <h6 class="mb-3">Custom Upload (Both Videos)</h6>
-                    <form id="uploadForm" class="row g-3">
+                    <form id="customUploadForm" class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label">WWE Video</label>
                             <input type="file" class="form-control" name="wwe_video" accept="video/*" required>
@@ -540,9 +540,111 @@
             }
         }
 
-        // Alert system
-        function showAlert(type, message) {
+        // Function to handle single video upload
+        document.getElementById('singleVideoForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const progressBar = document.getElementById('singleUploadProgress');
+            const uploadBtn = document.getElementById('singleUploadBtn');
+            
+            try {
+                // Disable button and show progress
+                uploadBtn.disabled = true;
+                progressBar.style.display = 'block';
+                progressBar.style.width = '0%';
+                
+                // Show uploading status
+                showAlert('Uploading video...', 'info');
+                
+                const response = await fetch('/api/stitch_single', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Upload failed');
+                }
+                
+                if (!data.success) {
+                    throw new Error(data.message || 'Upload failed');
+                }
+                
+                // Show success message
+                showAlert('Video uploaded successfully! Processing started.', 'success');
+                
+                // Reset form
+                this.reset();
+                
+                // Refresh jobs list
+                refreshJobs();
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                showAlert(error.message || 'Upload failed. Please try again.', 'error');
+            } finally {
+                // Reset progress bar and button
+                progressBar.style.display = 'none';
+                uploadBtn.disabled = false;
+            }
+        });
+
+        // Function to handle custom upload
+        document.getElementById('customUploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const progressBar = document.getElementById('uploadProgress');
+            const uploadBtn = document.getElementById('uploadBtn');
+            
+            try {
+                // Disable button and show progress
+                uploadBtn.disabled = true;
+                progressBar.style.display = 'block';
+                progressBar.style.width = '0%';
+                
+                // Show uploading status
+                showAlert('Uploading videos...', 'info');
+                
+                const response = await fetch('/api/stitch', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Upload failed');
+                }
+                
+                if (!data.success) {
+                    throw new Error(data.message || 'Upload failed');
+                }
+                
+                // Show success message
+                showAlert('Videos uploaded successfully! Processing started.', 'success');
+                
+                // Reset form
+                this.reset();
+                
+                // Refresh jobs list
+                refreshJobs();
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                showAlert(error.message || 'Upload failed. Please try again.', 'error');
+            } finally {
+                // Reset progress bar and button
+                progressBar.style.display = 'none';
+                uploadBtn.disabled = false;
+            }
+        });
+
+        // Function to show alerts
+        function showAlert(message, type = 'info') {
             const alertContainer = document.getElementById('alertContainer');
+            if (!alertContainer) return;
+
             if (!alertContainer) {
                 console.error('Alert container not found');
                 return;

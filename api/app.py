@@ -298,37 +298,146 @@ def get_jobs():
             'message': f'Error getting jobs: {str(e)}'
         }), 500
 
+@app.route('/api/stitch_single', methods=['POST'])
+def stitch_single_video():
+    """Process a single fan video with the default WWE video"""
+    try:
+        logging.info("Received single video upload request")
+        
+        if 'fan_video' not in request.files:
+            logging.error("No fan_video in request files")
+            return jsonify({'success': False, 'message': 'Fan video is required'}), 400
+
+        fan_video = request.files['fan_video']
+        logging.info(f"Received file: {fan_video.filename}")
+
+        if fan_video.filename == '':
+            logging.error("Empty filename")
+            return jsonify({'success': False, 'message': 'No selected file'}), 400
+
+        if not allowed_file(fan_video.filename):
+            logging.error(f"Invalid file type: {fan_video.filename}")
+            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'}), 400
+
+        # Check file size
+        if not check_file_size(fan_video):
+            logging.error(f"File too large: {fan_video.filename}")
+            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'}), 400
+
+        # Validate the uploaded video
+        is_valid, message = validate_uploaded_video(fan_video)
+        if not is_valid:
+            logging.error(f"Video validation failed: {message}")
+            return jsonify({'success': False, 'message': message}), 400
+
+        if not os.path.exists(DEFAULT_WWE_VIDEO):
+            logging.error(f"Default WWE video not found at: {DEFAULT_WWE_VIDEO}")
+            return jsonify({'success': False, 'message': 'Default WWE video not found'}), 404
+
+        # Validate the default WWE video
+        is_valid, message = validate_video_file(DEFAULT_WWE_VIDEO)
+        if not is_valid:
+            logging.error(f"Default WWE video validation failed: {message}")
+            return jsonify({'success': False, 'message': f"Default WWE video is invalid: {message}"}), 400
+
+        # Generate a unique job ID
+        job_id = str(uuid.uuid4())
+        logging.info(f"Generated job ID: {job_id}")
+        
+        # Create job directory
+        job_dir = os.path.join(UPLOAD_FOLDER, job_id)
+        os.makedirs(job_dir, exist_ok=True)
+        logging.info(f"Created job directory: {job_dir}")
+
+        # Save uploaded fan video
+        fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
+        fan_video.save(fan_path)
+        logging.info(f"Saved fan video to: {fan_path}")
+
+        # Add job to queue
+        job_data = {
+            'id': job_id,
+            'wwe_video': DEFAULT_WWE_VIDEO,
+            'fan_video': fan_path,
+            'status': 'processing',
+            'stage': 'initializing',
+            'progress': 0,
+            'created_at': datetime.now().isoformat(),
+            'original_wwe_filename': 'wwe_video.mp4',
+            'original_fan_filename': fan_video.filename,
+            'is_single_upload': True
+        }
+        
+        processing_jobs[job_id] = job_data
+        logging.info(f"Added job to processing queue: {job_id}")
+        
+        # Add to processing queue and start immediately
+        output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
+        job_queue.put((job_id, DEFAULT_WWE_VIDEO, fan_path, output_path))
+        logging.info(f"Added job to queue with output path: {output_path}")
+
+        # Start the job immediately
+        Thread(target=process_video_job, args=(job_id, DEFAULT_WWE_VIDEO, fan_path, output_path)).start()
+        logging.info(f"Started processing thread for job: {job_id}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Video uploaded successfully and processing started',
+            'job_id': job_id
+        })
+
+    except Exception as e:
+        logging.error(f"Error in stitch_single_video: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():
     try:
+        logging.info("Received custom video upload request")
+        
         if 'wwe_video' not in request.files or 'fan_video' not in request.files:
-            return jsonify({'success': False, 'message': 'Both WWE and fan videos are required'})
+            logging.error("Missing video files in request")
+            return jsonify({'success': False, 'message': 'Both WWE and fan videos are required'}), 400
 
         wwe_video = request.files['wwe_video']
         fan_video = request.files['fan_video']
 
         if wwe_video.filename == '' or fan_video.filename == '':
-            return jsonify({'success': False, 'message': 'No selected files'})
+            logging.error("Empty filenames")
+            return jsonify({'success': False, 'message': 'No selected files'}), 400
 
         if not allowed_file(wwe_video.filename) or not allowed_file(fan_video.filename):
-            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
+            logging.error(f"Invalid file types: {wwe_video.filename}, {fan_video.filename}")
+            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'}), 400
 
+        # Check file sizes
         if not check_file_size(wwe_video) or not check_file_size(fan_video):
-            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
+            logging.error("File size exceeds limit")
+            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'}), 400
+
+        # Validate both videos
+        for video, name in [(wwe_video, 'WWE'), (fan_video, 'Fan')]:
+            is_valid, message = validate_uploaded_video(video)
+            if not is_valid:
+                logging.error(f"{name} video validation failed: {message}")
+                return jsonify({'success': False, 'message': f"{name} video: {message}"}), 400
 
         # Generate a unique job ID
         job_id = str(uuid.uuid4())
+        logging.info(f"Generated job ID: {job_id}")
         
         # Create job directory
         job_dir = os.path.join(UPLOAD_FOLDER, job_id)
         os.makedirs(job_dir, exist_ok=True)
+        logging.info(f"Created job directory: {job_dir}")
 
-        # Save uploaded files with original names
+        # Save uploaded files
         wwe_path = os.path.join(job_dir, secure_filename(wwe_video.filename))
         fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
         
         wwe_video.save(wwe_path)
         fan_video.save(fan_path)
+        logging.info(f"Saved videos to: {wwe_path}, {fan_path}")
 
         # Add job to queue
         job_data = {
@@ -340,17 +449,21 @@ def stitch_videos():
             'progress': 0,
             'created_at': datetime.now().isoformat(),
             'original_wwe_filename': wwe_video.filename,
-            'original_fan_filename': fan_video.filename
+            'original_fan_filename': fan_video.filename,
+            'is_single_upload': False
         }
         
         processing_jobs[job_id] = job_data
+        logging.info(f"Added job to processing queue: {job_id}")
         
         # Add to processing queue and start immediately
         output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
         job_queue.put((job_id, wwe_path, fan_path, output_path))
+        logging.info(f"Added job to queue with output path: {output_path}")
 
         # Start the job immediately
         Thread(target=process_video_job, args=(job_id, wwe_path, fan_path, output_path)).start()
+        logging.info(f"Started processing thread for job: {job_id}")
 
         return jsonify({
             'success': True,
@@ -359,8 +472,8 @@ def stitch_videos():
         })
 
     except Exception as e:
-        logging.error(f"Error in stitch_videos: {str(e)}")
-        return jsonify({'success': False, 'message': str(e)})
+        logging.error(f"Error in stitch_videos: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/job/<job_id>', methods=['GET'])
 def get_job_status(job_id):
@@ -687,6 +800,8 @@ def validate_uploaded_video(file):
         size = file.tell() / (1024 * 1024)  # Convert to MB
         file.seek(0)
         
+        logging.info(f"Validating uploaded file: size={size:.2f}MB")
+        
         if size > MAX_FILE_SIZE_MB:
             return False, f"File size exceeds {MAX_FILE_SIZE_MB}MB limit"
         
@@ -696,6 +811,7 @@ def validate_uploaded_video(file):
         # Save to temporary file for validation
         temp_path = os.path.join(UPLOAD_FOLDER, f"temp_{uuid.uuid4()}.mp4")
         file.save(temp_path)
+        logging.info(f"Saved temporary file: {temp_path}")
         
         # Validate using FFMPEG
         result = subprocess.run([
@@ -706,14 +822,18 @@ def validate_uploaded_video(file):
         # Clean up temp file
         try:
             os.remove(temp_path)
-        except:
-            pass
+            logging.info("Cleaned up temporary file")
+        except Exception as e:
+            logging.warning(f"Error cleaning up temp file: {str(e)}")
         
         if result.stderr:
+            logging.error(f"FFMPEG validation error: {result.stderr}")
             return False, f"Invalid video file: {result.stderr}"
         
+        logging.info("File validation successful")
         return True, "Video file is valid"
     except Exception as e:
+        logging.error(f"Error validating video: {str(e)}")
         return False, f"Error validating video: {str(e)}"
 
 def validate_video_file(file_path):
@@ -740,78 +860,6 @@ def validate_video_file(file_path):
         return True, "Video file is valid"
     except Exception as e:
         return False, f"Error validating video: {str(e)}"
-
-@app.route('/api/stitch_single', methods=['POST'])
-def stitch_single_video():
-    """Process a single fan video with the default WWE video"""
-    try:
-        if 'fan_video' not in request.files:
-            return jsonify({'success': False, 'message': 'Fan video is required'})
-
-        fan_video = request.files['fan_video']
-
-        if fan_video.filename == '':
-            return jsonify({'success': False, 'message': 'No selected file'})
-
-        if not allowed_file(fan_video.filename):
-            return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
-
-        # Validate the uploaded video
-        is_valid, message = validate_uploaded_video(fan_video)
-        if not is_valid:
-            return jsonify({'success': False, 'message': message})
-
-        if not os.path.exists(DEFAULT_WWE_VIDEO):
-            return jsonify({'success': False, 'message': 'Default WWE video not found'})
-
-        # Validate the default WWE video
-        is_valid, message = validate_video_file(DEFAULT_WWE_VIDEO)
-        if not is_valid:
-            return jsonify({'success': False, 'message': f"Default WWE video is invalid: {message}"})
-
-        # Generate a unique job ID
-        job_id = str(uuid.uuid4())
-        
-        # Create job directory
-        job_dir = os.path.join(UPLOAD_FOLDER, job_id)
-        os.makedirs(job_dir, exist_ok=True)
-
-        # Save uploaded fan video
-        fan_path = os.path.join(job_dir, secure_filename(fan_video.filename))
-        fan_video.save(fan_path)
-
-        # Add job to queue
-        job_data = {
-            'id': job_id,
-            'wwe_video': DEFAULT_WWE_VIDEO,
-            'fan_video': fan_path,
-            'status': 'processing',
-            'stage': 'initializing',
-            'progress': 0,
-            'created_at': datetime.now().isoformat(),
-            'original_wwe_filename': 'wwe_video.mp4',
-            'original_fan_filename': fan_video.filename,
-            'is_single_upload': True
-        }
-        
-        processing_jobs[job_id] = job_data
-        
-        # Add to processing queue and start immediately
-        output_path = os.path.join(OUTPUT_FOLDER, f"{job_id}.mp4")
-        job_queue.put((job_id, DEFAULT_WWE_VIDEO, fan_path, output_path))
-
-        # Start the job immediately
-        Thread(target=process_video_job, args=(job_id, DEFAULT_WWE_VIDEO, fan_path, output_path)).start()
-
-        return jsonify({
-            'success': True,
-            'message': 'Video uploaded successfully and processing started',
-            'job_id': job_id
-        })
-
-    except Exception as e:
-        logging.error(f"Error in stitch_single_video: {str(e)}")
-        return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/outputs', methods=['GET'])
 def get_output_files():

@@ -9,7 +9,7 @@ services:
       apt-get update && apt-get install -y ffmpeg
       # Install Python dependencies
       pip install -r requirements.txt
-    startCommand: gunicorn api.wsgi:app
+    startCommand: gunicorn api.wsgi:app --timeout 300 --workers 2 --threads 2 --worker-class gthread --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
@@ -27,6 +27,12 @@ services:
         value: 24
       - key: DEFAULT_WWE_VIDEO
         value: /opt/render/project/src/wwe_video.mp4
+      - key: GUNICORN_TIMEOUT
+        value: 300
+      - key: GUNICORN_WORKERS
+        value: 2
+      - key: GUNICORN_THREADS
+        value: 2
     healthCheckPath: /api/status
     disk:
       name: video-storage

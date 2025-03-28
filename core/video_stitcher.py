@@ -197,15 +197,23 @@ class VideoStitcher:
             if progress_callback:
                 progress_callback(0.8, 'finalizing')
             
-            # Write the final video
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                audio_codec='aac',
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True,
-                fps=self.target_fps
-            )
+            # Write the final video with timeout handling
+            try:
+                final_video.write_videofile(
+                    output_path,
+                    codec='libx264',
+                    audio_codec='aac',
+                    temp_audiofile='temp-audio.m4a',
+                    remove_temp=True,
+                    fps=self.target_fps,
+                    threads=2,  # Use multiple threads for encoding
+                    preset='medium',  # Balance between speed and quality
+                    bitrate='5000k'  # Set a reasonable bitrate
+                )
+            except Exception as e:
+                if "timeout" in str(e).lower():
+                    raise Exception("Video processing timed out. Please try again with a shorter video.")
+                raise
             
             # Close all clips to free up resources
             final_video.close()
