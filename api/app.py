@@ -14,6 +14,7 @@ from threading import Thread
 import pickle
 import cv2
 import subprocess
+from werkzeug.exceptions import HTTPException
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +47,8 @@ MAX_FILE_AGE_HOURS = 24
 MAX_CONCURRENT_PROCESSES = 2
 MAX_QUEUE_SIZE = 10
 MAX_RECENT_JOBS = 50
+MAX_WORKER_TIMEOUT = 300  # 5 minutes
+ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov'}
 
 # Create necessary directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -80,7 +83,7 @@ processing_lock = threading.Lock()
 recent_jobs = []
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def check_file_size(file):
     file.seek(0, os.SEEK_END)
@@ -251,51 +254,34 @@ def dashboard():
 
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
-    """Get active and recent jobs"""
     try:
-        with processing_lock:
-            active_jobs = []
-            for job_id, job in processing_jobs.items():
-                if job['status'] in ['queued', 'processing', 'paused']:
-                    job_info = {
-                        'id': job_id,
-                        'status': job['status'],
-                        'created_at': job['created_at'],
-                        'start_time': job.get('start_time'),
-                        'progress': job.get('progress', 0),
-                        'stage': job.get('stage', 'queued'),
-                        'message': job.get('message', ''),
-                        'error': job.get('error', '')
-                    }
-                    active_jobs.append(job_info)
-            
-            recent_job_details = []
-            for job in recent_jobs:
-                job_info = {
-                    'id': job.get('id'),
-                    'status': job.get('status'),
-                    'created_at': job.get('created_at'),
-                    'start_time': job.get('start_time'),
-                    'end_time': job.get('end_time'),
-                    'progress': job.get('progress', 0),
-                    'stage': job.get('stage', 'completed'),
-                    'message': job.get('message', ''),
-                    'error': job.get('error', ''),
-                    'output_size': job.get('output_size', 0)
-                }
-                recent_job_details.append(job_info)
-            
-            return jsonify({
-                'success': True,
-                'active_jobs': active_jobs,
-                'recent_jobs': recent_job_details,
-                'server_time': datetime.now().isoformat()
-            })
+        # Get active jobs
+        active_jobs = []
+        for job_id, job_data in processing_jobs.items():
+            if job_data['status'] in ['processing', 'queued']:
+                active_jobs.append(job_data)
+
+        # Get recent jobs (completed, failed, or stopped)
+        recent_jobs = []
+        for job_id, job_data in processing_jobs.items():
+            if job_data['status'] in ['completed', 'failed', 'stopped']:
+                recent_jobs.append(job_data)
+
+        # Sort recent jobs by creation date (newest first)
+        recent_jobs.sort(key=lambda x: x['created_at'], reverse=True)
+        recent_jobs = recent_jobs[:10]  # Limit to 10 most recent jobs
+
+        return jsonify({
+            'success': True,
+            'active_jobs': active_jobs,
+            'recent_jobs': recent_jobs
+        })
     except Exception as e:
         logging.error(f"Error getting jobs: {str(e)}")
         return jsonify({
             'success': False,
-            'message': f'Error getting jobs: {str(e)}'
+            'message': 'Failed to get jobs',
+            'code': 500
         }), 500
 
 @app.route('/api/stitch_single', methods=['POST'])
@@ -387,8 +373,12 @@ def stitch_single_video():
         })
 
     except Exception as e:
-        logging.error(f"Error in stitch_single_video: {str(e)}", exc_info=True)
-        return jsonify({'success': False, 'message': str(e)}), 500
+        logging.error(f"Error in stitch_single_video: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred while processing your request',
+            'code': 500
+        }), 500
 
 @app.route('/api/stitch', methods=['POST'])
 def stitch_videos():
@@ -951,6 +941,56 @@ def schedule_cleanup():
     while True:
         cleanup_old_files()
         time.sleep(3600)  # Run cleanup every hour
+
+# Add error handlers
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    logging.error(f"HTTP error: {error.code} - {error.description}")
+    return jsonify({
+        'success': False,
+        'message': error.description,
+        'code': error.code
+    }), error.code
+
+@app.errorhandler(Exception)
+def handle_generic_error(error):
+    logging.error(f"Unexpected error: {str(error)}\n{traceback.format_exc()}")
+    return jsonify({
+        'success': False,
+        'message': 'An unexpected error occurred',
+        'code': 500
+    }), 500
+
+# Add a health check endpoint
+@app.route('/api/health')
+def health_check():
+    try:
+        # Check if the upload and output directories exist and are writable
+        os.access(UPLOAD_FOLDER, os.W_OK)
+        os.access(OUTPUT_FOLDER, os.W_OK)
+        
+        # Check if the default WWE video exists and is valid
+        if os.path.exists(DEFAULT_WWE_VIDEO):
+            is_valid, _ = validate_video_file(DEFAULT_WWE_VIDEO)
+            if not is_valid:
+                return jsonify({
+                    'success': False,
+                    'message': 'Default WWE video is invalid',
+                    'code': 500
+                }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': 'Service is healthy',
+            'code': 200
+        })
+    except Exception as e:
+        logging.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Service is unhealthy',
+            'code': 500
+        }), 500
 
 if __name__ == '__main__':
     # Start cleanup thread
