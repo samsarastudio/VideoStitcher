@@ -561,11 +561,11 @@
                     body: formData
                 });
                 
-                const data = await response.json();
-                
                 if (!response.ok) {
-                    throw new Error(data.message || 'Upload failed');
+                    throw new Error(`Server error: ${response.status}`);
                 }
+                
+                const data = await response.json();
                 
                 if (!data.success) {
                     throw new Error(data.message || 'Upload failed');
@@ -611,11 +611,11 @@
                     body: formData
                 });
                 
-                const data = await response.json();
-                
                 if (!response.ok) {
-                    throw new Error(data.message || 'Upload failed');
+                    throw new Error(`Server error: ${response.status}`);
                 }
+                
+                const data = await response.json();
                 
                 if (!data.success) {
                     throw new Error(data.message || 'Upload failed');
@@ -667,203 +667,102 @@
             }, 5000);
         }
 
-        // Update the refreshJobs function to also refresh output files
+        // Update the refreshJobs function to handle errors better
         async function refreshJobs() {
             try {
                 const response = await fetch('/api/jobs');
+                
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+                
                 const data = await response.json();
                 
-                if (data.success) {
-                    updateActiveJobs(data.active_jobs);
-                    updateRecentJobs(data.recent_jobs);
-                } else {
-                    showAlert('danger', data.message || 'Failed to refresh jobs');
+                if (!data.success) {
+                    throw new Error(data.message || 'Failed to refresh jobs');
                 }
+                
+                // Update active jobs
+                const activeJobsContainer = document.getElementById('activeJobs');
+                if (activeJobsContainer) {
+                    activeJobsContainer.innerHTML = '';
+                    data.active_jobs.forEach(job => {
+                        const jobCard = createJobCard(job);
+                        activeJobsContainer.appendChild(jobCard);
+                    });
+                }
+                
+                // Update recent jobs
+                const recentJobsContainer = document.getElementById('recentJobs');
+                if (recentJobsContainer) {
+                    recentJobsContainer.innerHTML = '';
+                    data.recent_jobs.forEach(job => {
+                        const jobCard = createJobCard(job);
+                        recentJobsContainer.appendChild(jobCard);
+                    });
+                }
+                
+                // Update output files
+                refreshOutputFiles();
+                
             } catch (error) {
-                showAlert('danger', 'Error refreshing jobs');
                 console.error('Refresh jobs error:', error);
+                showAlert('Error refreshing jobs list. Please try again.', 'error');
             }
-
-            // Also refresh output files
-            refreshOutputFiles();
         }
 
         // Update the refreshOutputFiles function to handle errors better
         async function refreshOutputFiles() {
             try {
                 const response = await fetch('/api/outputs');
+                
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+                
                 const data = await response.json();
                 
-                if (data.success) {
-                    updateOutputFiles(data.files);
-                } else {
-                    showAlert('danger', data.message || 'Failed to load output files');
+                if (!data.success) {
+                    throw new Error(data.message || 'Failed to load output files');
                 }
+                
+                const outputFilesContainer = document.getElementById('outputFiles');
+                if (!outputFilesContainer) return;
+                
+                if (!data.files || data.files.length === 0) {
+                    outputFilesContainer.innerHTML = '<div class="text-center text-muted">No output files available</div>';
+                    return;
+                }
+                
+                outputFilesContainer.innerHTML = data.files.map(file => `
+                    <div class="output-file-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${file.name}</strong>
+                                <br>
+                                <small class="text-muted">
+                                    Size: ${(file.size / (1024 * 1024)).toFixed(2)} MB
+                                    <br>
+                                    Created: ${new Date(file.created_at).toLocaleString()}
+                                </small>
+                            </div>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-primary" onclick="downloadFile('${file.job_id}')">
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteFile('${file.job_id}')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
             } catch (error) {
-                showAlert('danger', 'Error loading output files');
                 console.error('Error refreshing output files:', error);
+                showAlert('Error loading output files. Please try again.', 'error');
             }
         }
-
-        // Update the updateOutputFiles function to show empty state
-        function updateOutputFiles(files) {
-            const container = document.getElementById('outputFiles');
-            if (!container) {
-                console.error('Output files container not found');
-                return;
-            }
-
-            container.innerHTML = '';
-            
-            if (!files || files.length === 0) {
-                container.innerHTML = `
-                    <div class="col-12">
-                        <div class="alert alert-info">
-                            No output files available
-                        </div>
-                    </div>
-                `;
-                return;
-            }
-            
-            files.forEach(file => {
-                const fileSize = (file.size / (1024 * 1024)).toFixed(1);
-                const card = document.createElement('div');
-                card.className = 'col-md-4 mb-3';
-                card.innerHTML = `
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <h6 class="card-title">${file.name}</h6>
-                                <span class="badge bg-info">${fileSize} MB</span>
-                            </div>
-                            <div class="mb-3">
-                                <small class="text-muted">Created: ${formatDate(file.created_at)}</small>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <a href="/api/download/${file.job_id}" class="btn btn-sm btn-success">
-                                    <i class="fas fa-download"></i> Download
-                                </a>
-                                <button class="btn btn-sm btn-info" onclick="showPreview('/api/preview/${file.job_id}')">
-                                    <i class="fas fa-play"></i> Preview
-                                </button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteOutput('${file.job_id}')">
-                                    <i class="fas fa-trash"></i> Delete
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        // Update the form submission handlers to show upload progress
-        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            const progressBar = document.getElementById('uploadProgress');
-            const progressBarInner = progressBar.querySelector('.progress-bar');
-            const uploadBtn = document.getElementById('uploadBtn');
-            
-            try {
-                progressBar.classList.remove('d-none');
-                uploadBtn.disabled = true;
-                
-                const xhr = new XMLHttpRequest();
-                xhr.upload.onprogress = function(e) {
-                    if (e.lengthComputable) {
-                        const percentComplete = (e.loaded / e.total) * 100;
-                        progressBarInner.style.width = percentComplete + '%';
-                    }
-                };
-                
-                xhr.onload = function() {
-                    if (xhr.status === 200) {
-                        const data = JSON.parse(xhr.responseText);
-                        if (data.success) {
-                            showAlert('success', 'Videos uploaded successfully');
-                            this.reset();
-                            refreshJobs();
-                        } else {
-                            showAlert('danger', data.message || 'Upload failed');
-                        }
-                    } else {
-                        showAlert('danger', 'Upload failed');
-                    }
-                };
-                
-                xhr.onerror = function() {
-                    showAlert('danger', 'Error uploading videos');
-                };
-                
-                xhr.open('POST', '/api/stitch', true);
-                xhr.send(formData);
-                
-            } catch (error) {
-                showAlert('danger', 'Error uploading videos');
-                console.error('Upload error:', error);
-            } finally {
-                setTimeout(() => {
-                    progressBar.classList.add('d-none');
-                    uploadBtn.disabled = false;
-                    progressBarInner.style.width = '0%';
-                }, 1000);
-            }
-        });
-
-        document.getElementById('singleUploadForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
-            const progressBar = document.getElementById('singleUploadProgress');
-            const progressBarInner = progressBar.querySelector('.progress-bar');
-            const uploadBtn = document.getElementById('singleUploadBtn');
-            
-            try {
-                progressBar.classList.remove('d-none');
-                uploadBtn.disabled = true;
-                
-                const xhr = new XMLHttpRequest();
-                xhr.upload.onprogress = function(e) {
-                    if (e.lengthComputable) {
-                        const percentComplete = (e.loaded / e.total) * 100;
-                        progressBarInner.style.width = percentComplete + '%';
-                    }
-                };
-                
-                xhr.onload = function() {
-                    if (xhr.status === 200) {
-                        const data = JSON.parse(xhr.responseText);
-                        if (data.success) {
-                            showAlert('success', 'Video uploaded successfully');
-                            this.reset();
-                            refreshJobs();
-                        } else {
-                            showAlert('danger', data.message || 'Upload failed');
-                        }
-                    } else {
-                        showAlert('danger', 'Upload failed');
-                    }
-                };
-                
-                xhr.onerror = function() {
-                    showAlert('danger', 'Error uploading video');
-                };
-                
-                xhr.open('POST', '/api/stitch_single', true);
-                xhr.send(formData);
-                
-            } catch (error) {
-                showAlert('danger', 'Error uploading video');
-                console.error('Upload error:', error);
-            } finally {
-                setTimeout(() => {
-                    progressBar.classList.add('d-none');
-                    uploadBtn.disabled = false;
-                    progressBarInner.style.width = '0%';
-                }, 1000);
-            }
-        });
 
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', function() {
@@ -872,26 +771,6 @@
             refreshOutputFiles();
             refreshInterval = setInterval(refreshJobs, 5000);
         });
-
-        // Update active jobs display
-        function updateActiveJobs(jobs) {
-            const container = document.getElementById('activeJobs');
-            container.innerHTML = '';
-            
-            jobs.forEach(job => {
-                container.appendChild(createJobCard(job, true));
-            });
-        }
-
-        // Update recent jobs display
-        function updateRecentJobs(jobs) {
-            const container = document.getElementById('recentJobs');
-            container.innerHTML = '';
-            
-            jobs.forEach(job => {
-                container.appendChild(createJobCard(job, false));
-            });
-        }
 
         // Create job card
         function createJobCard(job, isActive) {
