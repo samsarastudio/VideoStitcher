@@ -2,6 +2,44 @@ import cv2
 import numpy as np
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
 import os
+import subprocess
+import logging
+
+def check_ffmpeg_version():
+    """Check FFMPEG version and return True if it's recent enough"""
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+        version_line = result.stdout.split('\n')[0]
+        version = version_line.split(' ')[2].split('.')[0]  # Get major version number
+        return int(version) >= 4
+    except Exception as e:
+        logging.error(f"Error checking FFMPEG version: {str(e)}")
+        return False
+
+def validate_video_file(file_path):
+    """Validate a video file using FFMPEG"""
+    try:
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return False, "File does not exist"
+        
+        # Check file size
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if size_mb < 0.01:  # Less than 10KB
+            return False, f"File too small: {size_mb:.2f} MB"
+        
+        # Use FFMPEG to check video file
+        result = subprocess.run([
+            'ffmpeg', '-v', 'error', '-i', file_path,
+            '-f', 'null', '-'
+        ], capture_output=True, text=True)
+        
+        if result.stderr:
+            return False, f"Invalid video file: {result.stderr}"
+        
+        return True, "Video file is valid"
+    except Exception as e:
+        return False, f"Error validating video: {str(e)}"
 
 class VideoStitcher:
     def __init__(self, wwe_video_path, fan_video_path):
@@ -9,15 +47,36 @@ class VideoStitcher:
         Initialize the VideoStitcher with paths to input videos
         """
         try:
-            self.wwe_video = VideoFileClip(wwe_video_path)
-            self.fan_video = VideoFileClip(fan_video_path)
+            # Check FFMPEG version first
+            if not check_ffmpeg_version():
+                raise Exception("FFMPEG version is too old. Please update to version 4 or higher.")
+            
+            # Validate both video files
+            for video_path in [wwe_video_path, fan_video_path]:
+                is_valid, message = validate_video_file(video_path)
+                if not is_valid:
+                    raise Exception(f"Invalid video file {os.path.basename(video_path)}: {message}")
+            
+            # Try to load videos with error handling
+            try:
+                self.wwe_video = VideoFileClip(wwe_video_path)
+                self.fan_video = VideoFileClip(fan_video_path)
+            except Exception as e:
+                raise Exception(f"Failed to load video files: {str(e)}")
             
             # Extract audio from fan video
-            self.commentary = self.fan_video.audio
+            try:
+                self.commentary = self.fan_video.audio
+            except Exception as e:
+                logging.warning(f"Could not extract audio from fan video: {str(e)}")
+                self.commentary = None
             
             # Get frame rates
             self.wwe_fps = self.wwe_video.fps
             self.fan_fps = self.fan_video.fps
+            
+            if self.wwe_fps <= 0 or self.fan_fps <= 0:
+                raise Exception("Invalid frame rate detected in one or both videos")
             
             # Use the higher frame rate for the final video
             self.target_fps = max(self.wwe_fps, self.fan_fps)
@@ -31,13 +90,23 @@ class VideoStitcher:
             self.transition_duration = 0.5  # seconds
             
             # Print video information for debugging
-            print(f"WWE Video FPS: {self.wwe_fps}")
-            print(f"Fan Video FPS: {self.fan_fps}")
-            print(f"Target FPS: {self.target_fps}")
-            print(f"WWE Video Duration: {self.wwe_video.duration:.2f} seconds")
-            print(f"Fan Video Duration: {self.fan_video.duration:.2f} seconds")
+            logging.info(f"WWE Video FPS: {self.wwe_fps}")
+            logging.info(f"Fan Video FPS: {self.fan_fps}")
+            logging.info(f"Target FPS: {self.target_fps}")
+            logging.info(f"WWE Video Duration: {self.wwe_video.duration:.2f} seconds")
+            logging.info(f"Fan Video Duration: {self.fan_video.duration:.2f} seconds")
             
         except Exception as e:
+            # Clean up any opened resources
+            try:
+                if hasattr(self, 'wwe_video'):
+                    self.wwe_video.close()
+                if hasattr(self, 'fan_video'):
+                    self.fan_video.close()
+                if hasattr(self, 'commentary') and self.commentary:
+                    self.commentary.close()
+            except:
+                pass
             raise Exception(f"Error initializing VideoStitcher: {str(e)}")
 
     def create_video_segments(self, progress_callback=None):

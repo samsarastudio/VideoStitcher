@@ -3,21 +3,24 @@ services:
     name: video-stitcher
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    startCommand: gunicorn api.wsgi:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.9.0
       - key: FLASK_ENV
         value: production
-      - key: RENDER_TEMP_DIR
-        value: /tmp
-    healthCheckPath: /
-    autoDeploy: true
+      - key: MAX_FILE_SIZE_MB
+        value: 100
+      - key: MAX_CONCURRENT_PROCESSES
+        value: 2
+      - key: MAX_QUEUE_SIZE
+        value: 10
+      - key: MAX_RECENT_JOBS
+        value: 50
+      - key: MAX_FILE_AGE_HOURS
+        value: 24
+    healthCheckPath: /api/status
     disk:
-      name: uploads
-      mountPath: /tmp/uploads
-      sizeGB: 10
-    disk:
-      name: outputs
-      mountPath: /tmp/outputs
+      name: video-storage
+      mountPath: /tmp
       sizeGB: 10 

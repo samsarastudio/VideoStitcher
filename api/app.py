@@ -13,6 +13,7 @@ import traceback
 from threading import Thread
 import pickle
 import cv2
+import subprocess
 
 # Configure logging
 logging.basicConfig(
@@ -670,6 +671,43 @@ def check_wwe_video():
             'path': DEFAULT_WWE_VIDEO
         }), 500
 
+def validate_uploaded_video(file):
+    """Validate an uploaded video file"""
+    try:
+        # Check file size
+        file.seek(0, os.SEEK_END)
+        size = file.tell() / (1024 * 1024)  # Convert to MB
+        file.seek(0)
+        
+        if size > MAX_FILE_SIZE_MB:
+            return False, f"File size exceeds {MAX_FILE_SIZE_MB}MB limit"
+        
+        if size < 0.01:  # Less than 10KB
+            return False, "File is too small"
+        
+        # Save to temporary file for validation
+        temp_path = os.path.join(UPLOAD_FOLDER, f"temp_{uuid.uuid4()}.mp4")
+        file.save(temp_path)
+        
+        # Validate using FFMPEG
+        result = subprocess.run([
+            'ffmpeg', '-v', 'error', '-i', temp_path,
+            '-f', 'null', '-'
+        ], capture_output=True, text=True)
+        
+        # Clean up temp file
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        if result.stderr:
+            return False, f"Invalid video file: {result.stderr}"
+        
+        return True, "Video file is valid"
+    except Exception as e:
+        return False, f"Error validating video: {str(e)}"
+
 @app.route('/api/stitch_single', methods=['POST'])
 def stitch_single_video():
     """Process a single fan video with the default WWE video"""
@@ -685,11 +723,18 @@ def stitch_single_video():
         if not allowed_file(fan_video.filename):
             return jsonify({'success': False, 'message': 'Invalid file type. Only MP4, AVI, and MOV files are allowed.'})
 
-        if not check_file_size(fan_video):
-            return jsonify({'success': False, 'message': f'File size exceeds {MAX_FILE_SIZE_MB}MB limit'})
+        # Validate the uploaded video
+        is_valid, message = validate_uploaded_video(fan_video)
+        if not is_valid:
+            return jsonify({'success': False, 'message': message})
 
         if not os.path.exists(DEFAULT_WWE_VIDEO):
             return jsonify({'success': False, 'message': 'Default WWE video not found'})
+
+        # Validate the default WWE video
+        is_valid, message = validate_video_file(DEFAULT_WWE_VIDEO)
+        if not is_valid:
+            return jsonify({'success': False, 'message': f"Default WWE video is invalid: {message}"})
 
         # Generate a unique job ID
         job_id = str(uuid.uuid4())
