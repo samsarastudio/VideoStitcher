@@ -8,75 +8,96 @@ class VideoStitcher:
         """
         Initialize the VideoStitcher with paths to input videos
         """
-        self.wwe_video = VideoFileClip(wwe_video_path)
-        self.fan_video = VideoFileClip(fan_video_path)
-        
-        # Extract audio from fan video
-        self.commentary = self.fan_video.audio
-        
-        # Get frame rates
-        self.wwe_fps = self.wwe_video.fps
-        self.fan_fps = self.fan_video.fps
-        
-        # Use the higher frame rate for the final video
-        self.target_fps = max(self.wwe_fps, self.fan_fps)
-        
-        # Ensure all videos are the same size and frame rate
-        self.target_size = (1920, 1080)  # Standard HD resolution
-        self.wwe_video = self.wwe_video.resize(self.target_size).set_fps(self.target_fps)
-        self.fan_video = self.fan_video.resize(self.target_size).set_fps(self.target_fps)
-        
-        # Set the duration of the final video
-        self.final_duration = 30
-        
-        # Set transition duration
-        self.transition_duration = 0.5  # seconds
+        try:
+            self.wwe_video = VideoFileClip(wwe_video_path)
+            self.fan_video = VideoFileClip(fan_video_path)
+            
+            # Extract audio from fan video
+            self.commentary = self.fan_video.audio
+            
+            # Get frame rates
+            self.wwe_fps = self.wwe_video.fps
+            self.fan_fps = self.fan_video.fps
+            
+            # Use the higher frame rate for the final video
+            self.target_fps = max(self.wwe_fps, self.fan_fps)
+            
+            # Ensure all videos are the same size and frame rate
+            self.target_size = (1920, 1080)  # Standard HD resolution
+            self.wwe_video = self.wwe_video.resize(self.target_size).set_fps(self.target_fps)
+            self.fan_video = self.fan_video.resize(self.target_size).set_fps(self.target_fps)
+            
+            # Set transition duration
+            self.transition_duration = 0.5  # seconds
+            
+            # Print video information for debugging
+            print(f"WWE Video FPS: {self.wwe_fps}")
+            print(f"Fan Video FPS: {self.fan_fps}")
+            print(f"Target FPS: {self.target_fps}")
+            print(f"WWE Video Duration: {self.wwe_video.duration:.2f} seconds")
+            print(f"Fan Video Duration: {self.fan_video.duration:.2f} seconds")
+            
+        except Exception as e:
+            raise Exception(f"Error initializing VideoStitcher: {str(e)}")
 
     def create_video_segments(self, progress_callback=None):
         """
         Create video segments according to the specified timing with fade transitions
         """
-        segments = []
-        
-        # Calculate the duration of each segment
-        wwe_duration = self.wwe_video.duration
-        fan_duration = self.fan_video.duration
-        
-        # Define segment timings
-        segment_timings = [
-            (0, 4, "wwe"),    # 0s - 4s: Intro (WWE video)
-            (4, 7, "fan"),    # 4s - 7s: Fan video
-            (7, 10, "wwe"),   # 7s - 10s: WWE video
-            (10, 13, "fan"),  # 10s - 13s: Fan video
-            (13, 22, "wwe"),  # 13s - 22s: WWE video
-            (22, 25, "fan"),  # 22s - 25s: Fan video
-            (25, 30, "wwe")   # 25s - 30s: Final WWE video
-        ]
-        
-        total_segments = len(segment_timings)
-        
-        # Create segments based on timing
-        for i, (start_time, end_time, video_type) in enumerate(segment_timings):
-            if progress_callback:
-                progress = 0.1 + (i / total_segments) * 0.3  # 10% to 40% progress
-                progress_callback(progress, 'processing')
+        try:
+            segments = []
             
-            if video_type == "wwe":
-                segment = self.wwe_video.subclip(start_time, min(end_time, wwe_duration))
-            else:  # fan video
-                segment = self.fan_video.subclip(start_time, min(end_time, fan_duration))
+            # Calculate the duration of each segment
+            wwe_duration = self.wwe_video.duration
+            fan_duration = self.fan_video.duration
             
-            # Add fade in to all segments except the first one
-            if i > 0:
-                segment = segment.fadein(self.transition_duration)
+            # Calculate segment durations based on available video lengths
+            total_duration = min(wwe_duration, fan_duration)
+            segment_duration = total_duration / 7  # Split into 7 segments
             
-            # Add fade out to all segments except the last one
-            if i < len(segment_timings) - 1:
-                segment = segment.fadeout(self.transition_duration)
+            # Define segment timings
+            segment_timings = []
+            for i in range(7):
+                start_time = i * segment_duration
+                end_time = (i + 1) * segment_duration
+                video_type = "wwe" if i % 2 == 0 else "fan"
+                segment_timings.append((start_time, end_time, video_type))
             
-            segments.append(segment)
-        
-        return segments
+            total_segments = len(segment_timings)
+            
+            # Create segments based on timing
+            for i, (start_time, end_time, video_type) in enumerate(segment_timings):
+                if progress_callback:
+                    progress = 0.1 + (i / total_segments) * 0.3  # 10% to 40% progress
+                    progress_callback(progress, 'processing')
+                
+                try:
+                    if video_type == "wwe":
+                        segment = self.wwe_video.subclip(start_time, min(end_time, wwe_duration))
+                    else:  # fan video
+                        segment = self.fan_video.subclip(start_time, min(end_time, fan_duration))
+                    
+                    # Add fade in to all segments except the first one
+                    if i > 0:
+                        segment = segment.fadein(self.transition_duration)
+                    
+                    # Add fade out to all segments except the last one
+                    if i < len(segment_timings) - 1:
+                        segment = segment.fadeout(self.transition_duration)
+                    
+                    segments.append(segment)
+                except Exception as e:
+                    raise Exception(f"Error creating segment {i}: {str(e)}")
+            
+            # Print segment durations for debugging
+            print("\nSegment durations:")
+            for i, segment in enumerate(segments):
+                print(f"Segment {i}: {segment.duration:.2f} seconds (FPS: {segment.fps})")
+            
+            return segments
+            
+        except Exception as e:
+            raise Exception(f"Error in create_video_segments: {str(e)}")
 
     def stitch_videos(self, output_path, progress_callback=None):
         """

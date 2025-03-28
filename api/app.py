@@ -122,12 +122,16 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             'message': 'Starting video processing...'
         })
         
+        logging.info(f"Starting job {job_id} with WWE video: {wwe_path} and fan video: {fan_path}")
+        
         # Validate input videos
         for video_path in [wwe_path, fan_path]:
             if not os.path.exists(video_path):
                 raise Exception(f"Video file not found: {video_path}")
             
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            logging.info(f"Video file size: {video_path} ({size_mb:.2f} MB)")
+            
             if size_mb < 0.01:  # Less than 10KB
                 raise Exception(f"Video file too small: {video_path} ({size_mb:.2f} MB)")
             
@@ -143,8 +147,11 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
         
         # Add error handling for video stitching
         try:
+            logging.info(f"Starting video stitching for job {job_id}")
             success, message = stitcher.stitch_videos(output_path, progress_callback=lambda p, s: update_job_progress(job_id, p, s))
+            logging.info(f"Video stitching completed for job {job_id}: success={success}, message={message}")
         except Exception as e:
+            logging.error(f"Error during video stitching for job {job_id}: {str(e)}")
             raise Exception(f"Error during video stitching: {str(e)}")
         
         if success:
@@ -153,8 +160,7 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
                 raise Exception("Output video not created")
             
             output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            if output_size_mb < 10:  # Less than 10MB
-                raise Exception(f"Output video too small: {output_size_mb:.2f} MB")
+            logging.info(f"Output video size: {output_size_mb:.2f} MB")
             
             # Validate output video is playable
             cap = cv2.VideoCapture(output_path)
@@ -174,6 +180,8 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
                 'output_filename': os.path.basename(output_path)
             })
             
+            logging.info(f"Job {job_id} completed successfully")
+            
             # Add to recent jobs
             with processing_lock:
                 recent_jobs.insert(0, processing_jobs[job_id].copy())
@@ -190,13 +198,13 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
             raise Exception(message)
             
     except Exception as e:
+        logging.error(f"Error processing job {job_id}: {str(e)}")
         processing_jobs[job_id].update({
             'status': 'failed',
             'error': str(e),
             'stage': 'failed',
             'progress': 0
         })
-        logging.error(f"Error processing job {job_id}: {str(e)}")
         
         # Clean up any partial output file
         try:
@@ -207,6 +215,7 @@ def process_video_job(job_id: str, wwe_path: str, fan_path: str, output_path: st
     finally:
         with processing_lock:
             active_processes -= 1
+            logging.info(f"Job {job_id} processing finished. Active processes: {active_processes}")
 
 def process_queue():
     """Process jobs from the queue"""
